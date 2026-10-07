@@ -229,6 +229,7 @@
 .mgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .mgrid__cell {
   position: relative;
+  isolation: isolate;
   aspect-ratio: 1 / 1;
   border: 0; padding: 0;
   border-radius: var(--r-sm);
@@ -258,16 +259,18 @@
 }
 .mgrid__play .ico { fill: currentColor; stroke-width: 1.2; }
 .mgrid__count {
-  position: absolute; right: 7px; bottom: 7px; z-index: 2;
+  position: absolute; left: 7px; bottom: 7px; z-index: 2;
   padding: 1px 7px;
   border-radius: var(--r-pill);
   background: rgba(20, 24, 30, .5);
   backdrop-filter: blur(6px);
   color: #fff; font-size: var(--fs-xs);
+  pointer-events: none;
 }
 
 /* 文字卡片 */
 .notecard {
+  position: relative;
   padding: 15px 17px;
   background: var(--surface-2);
   border-left: 3px solid var(--primary-soft);
@@ -278,6 +281,59 @@
   white-space: pre-wrap;
 }
 .notecard__title { font-size: var(--fs-base); font-weight: 600; color: var(--ink); margin-bottom: 5px; }
+
+/* 媒体网格 / 文字卡片上的「删除单条媒体」按钮（仅单地点详情出现，见 detail-modal mediaDeleteBtn） */
+.mgrid__del {
+  position: absolute; top: 8px; right: 8px; z-index: 10;
+  width: 24px; height: 24px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: rgba(20, 24, 30, .5); color: #fff;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  backdrop-filter: blur(4px);
+}
+.mgrid__del:hover { background: var(--danger, #c0492f); }
+.mgrid__del .ico {
+  width: 18px; height: 18px; stroke-width: 1.5;
+  display: block;
+}
+/* 文字卡片上的删除键（同样常驻可见，纯文本卡片上 hover 揭示不够直观） */
+.mgrid__del--static {
+  top: 8px; right: 8px;
+  background: rgba(20, 24, 30, .12); color: var(--ink-2);
+}
+.mgrid__del--static:hover { background: var(--danger, #c0492f); color: #fff; }
+
+/* 详情页底部：补充上传媒体 */
+.modal__addmedia { padding: 6px 22px 24px; border-top: 1px solid var(--line-soft); }
+.addmedia__toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px dashed var(--line-2); background: transparent;
+  color: var(--ink-2); font-size: var(--fs-sm); cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.addmedia__toggle:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-tint, rgba(124, 156, 195, .12)); }
+.addmedia__toggle .ico { width: 15px; height: 15px; }
+.addmedia__panel { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.addmedia__group {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+}
+.addmedia__file {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 13px; border-radius: var(--r-sm);
+  border: 1px solid var(--line-2); background: var(--surface-2);
+  color: var(--ink-2); font-size: var(--fs-sm); cursor: pointer; white-space: nowrap;
+  transition: border-color .15s, color .15s;
+}
+.addmedia__file:hover { border-color: var(--primary); color: var(--primary); }
+.addmedia__file .ico { width: 15px; height: 15px; }
+.addmedia__text { grid-column: 1 / -1; resize: vertical; min-height: 48px; line-height: 1.5; }
+.addmedia__cap { min-width: 0; }
+.addmedia__go { white-space: nowrap; }
+.addmedia__status { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); min-height: 1em; }
+.addmedia__status.is-error { color: var(--danger); }
 
 /* 迷你信息条 */
 .metarow {
@@ -393,6 +449,9 @@
   .modal__tabs { padding: 2px 16px 0; }
   .modal__mapbadge { display: none; }
   .lightbox__nav { width: 38px; height: 38px; }
+  .modal__addmedia { padding: 6px 16px 20px; }
+  .addmedia__group { grid-template-columns: 1fr; }
+  .addmedia__file, .addmedia__go { justify-content: center; }
 }
 /* 矮屏：面板更高，地图最大高度由 JS 按 clientHeight 计算，这里不再写死 --mw-* */
 @media (max-height: 620px) {

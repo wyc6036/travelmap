@@ -151,8 +151,31 @@ function createPlace(p) {
 }
 
 function deletePlace(id) {
+  /* 先取出该地点下媒体的 url / thumb_url（删完 DB 行就查不到了），
+     拿到底层对象 key。 */
+  const rows = db.prepare('SELECT url, thumb_url FROM media WHERE place_id=?').all(id);
+  /* 先删 DB 行（含其下媒体行）：保证地点立刻从地图消失，不依赖底层清理结果。 */
   stmt.delPlaceMedia.run(id);
   stmt.delPlace.run(id);
+  /* 再尽力删底层对象（图 / 缩略图 / 视频 / 首帧），失败仅告警，不阻塞主流程。
+     storage 通过惰性 require 引入，避免与 storage.js 的循环依赖在加载期互相阻塞。 */
+  const keys = [];
+  for (const r of rows) {
+    for (const u of [r.url, r.thumb_url]) {
+      if (!u) continue;
+      const k = String(u).split('/media/')[1];
+      if (k) keys.push(k);
+    }
+  }
+  if (keys.length) {
+    const storage = require('./storage');
+    (async () => {
+      for (const k of keys) {
+        try { await storage.deleteObject(k); }
+        catch (e) { console.warn('[deletePlace] 删除底层对象失败：', k, e.message); }
+      }
+    })();
+  }
 }
 
 function createTrip(t) {
@@ -205,6 +228,25 @@ function markMediaError(id) {
   stmt.setMediaErr.run(id);
 }
 
+/**
+ * 删除单条媒体：先删 DB 行，再尽力删底层对象（图 + 缩略图 / 视频 + 首帧）。
+ * storage 通过惰性 require 引入，避免与 storage.js 的循环依赖在加载期互相阻塞。
+ * @returns {Promise<boolean>} 是否真的删到了（没找到返回 false）
+ */
+async function deleteMedia(id) {
+  const row = db.prepare('SELECT id, url, thumb_url FROM media WHERE id=?').get(id);
+  if (!row) return false;
+  db.prepare('DELETE FROM media WHERE id=?').run(id);
+  const storage = require('./storage');
+  const keys = [row.url, row.thumb_url]
+    .map((u) => (u ? String(u).split('/media/')[1] : ''))
+    .filter(Boolean);
+  for (const k of keys) {
+    try { await storage.deleteObject(k); } catch (_) { /* 对象已丢失不影响结果 */ }
+  }
+  return true;
+}
+
 /* ----------------------------- 导出 API ----------------------------- */
 
 function getExport() {
@@ -219,7 +261,7 @@ function getExport() {
   const mediaByPlace = {};
   const mediaByTrip = {};
   for (const m of mediaRows) {
-    const item = { type: m.kind, url: m.url, caption: m.caption, poster: m.thumb_url || '' };
+    const item = { id: m.id, type: m.kind, url: m.url, caption: m.caption, poster: m.thumb_url || '' };
     if (m.text_body) item.text = m.text_body;
     if (m.place_id) (mediaByPlace[m.place_id] ||= []).push(item);
     if (m.trip_id) (mediaByTrip[m.trip_id] ||= []).push(item);
@@ -313,7 +355,7 @@ function maybeSeed() {
 module.exports = {
   db, DB_PATH, DATA_DIR,
   uid, saveTypes, getMeta, setMeta,
-  createPlace, deletePlace, createTrip, deleteTrip, addMedia,
+  createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
   markMediaReady, markMediaError,
   getExport, maybeSeed,
 };

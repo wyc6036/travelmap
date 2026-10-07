@@ -30,13 +30,29 @@ ENV NODE_ENV=production
 ENV PORT=8080
 ENV DATA_DIR=/data
 
-# 运行期只需 ffmpeg（视频转 H.264 + 抽首帧）；同样走 aliyun 镜像
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+# 运行期只需 ffmpeg（视频转 H.264 + 抽首帧）。
+# 各镜像站可达性因网络而异：用「短超时 + 多镜像兜底」循环，第一个能装上 ffmpeg 的就用它。
+# 已排除在你的网络里连不上的清华镜像；下列均为确认含 ffmpeg 的国内 CDN（HTTP 80，免证书依赖）。
+RUN set -ux; \
+    echo 'Acquire::Retries "1";' > /etc/apt/apt.conf.d/99-fastfail; \
+    echo 'Acquire::Connect::Timeout "8";' >> /etc/apt/apt.conf.d/99-fastfail; \
+    echo 'Acquire::Timeout "120";' >> /etc/apt/apt.conf.d/99-fastfail; \
+    rm -f /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; \
+    OK=0; \
+    for M in \
+      "http://mirrors.aliyun.com/debian" \
+      "http://mirrors.cloud.tencent.com/debian" \
+      "http://mirrors.ustc.edu.cn/debian" \
+      "http://mirrors.163.com/debian" ; do \
+      echo "deb $M bookworm main" > /etc/apt/sources.list.d/zz-mirror.list; \
+      if apt-get update >/dev/null 2>&1 && apt-get install -y --no-install-recommends ffmpeg; then \
+        echo ">> ffmpeg installed via $M"; OK=1; break; \
+      fi; \
+      echo "!! $M 连不上或装包失败，换下一个"; \
+    done; \
+    rm -f /etc/apt/sources.list.d/zz-mirror.list; \
+    rm -rf /var/lib/apt/lists/*; \
+    if [ "$OK" != "1" ]; then echo ">> FATAL: 所有镜像都未能安装 ffmpeg"; exit 1; fi
 
 COPY --from=build /app/node_modules ./node_modules
 COPY server.js package.json ./

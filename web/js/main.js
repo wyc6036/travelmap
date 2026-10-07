@@ -26,6 +26,7 @@ import { $$, warnOnce, toast, rafThrottle } from './utils.js';
 import { initAuth, showLogin } from './auth.js';
 import { initSetup } from './setup.js';
 import { createAddPlace } from './upload.js';
+import { createAddTrip } from './trip-edit.js';
 
 /* =========================================================
  * 启动状态
@@ -345,6 +346,7 @@ async function boot() {
     onSelectPlace: (place, opts) => selectPlace(place, { openModal: opts?.openModal, fly: true }),
     onOpenDetail: (place) => selectPlace(place, { openModal: true, fly: false }),
     onAddPlace: () => addPlace?.open(),
+    onAddTrip: () => addTrip?.open(),
     /* 行程分组头的标题被点开：直接开媒体弹窗，路线动画跑在弹窗上半部的小地图里。
        ⚠️ app.modal 是在 createUI **之后**才建的（见下面 createDetailModal），
           所以这里必须惰性取用，不能在参数里直接引用 app.modal.openTrip。 */
@@ -379,10 +381,19 @@ async function boot() {
     getTrips: () => app.trips,
     getVisited: () => app.visited,
     getStyleKey: () => app.styleKey,
+    /* 详情弹窗「编辑」→ 交给新增/编辑弹窗（addPlace 在下方创建，点击时才取用，无 TDZ 问题） */
+    onEdit: (place) => { addPlace?.edit(place); },
+    /* 详情弹窗「删除」→ 删完主动刷新一次地图打点（不必等 15 秒轮询） */
+    onDeleted: () => refreshData(),
+    /* 详情弹窗内「补充上传 / 删除单条媒体」→ 上传/删除后主动刷新（弹窗会跟着 refresh） */
+    onMediaChanged: () => refreshData(),
   });
 
   /* ---- 新增 / 上传（记录新足迹 / 照片 / 视频 / 笔记） ---- */
   const addPlace = createAddPlace({ getMap: () => app.map, onSaved: refreshData });
+
+  /* ---- 新建行程组（多地点行程） ---- */
+  const addTrip = createAddTrip({ getPlaces: () => app.places, onSaved: refreshData });
 
   /* ---- 鉴权：未设密码则开放，否则弹登录遮罩，登录成功才继续 ---- */
   const authed = await initAuth();

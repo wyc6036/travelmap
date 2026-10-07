@@ -1,17 +1,20 @@
 /**
- * upload.js · 新增地点 + 上传媒体
+ * upload.js · 新增 / 编辑地点 + 上传媒体
  * -----------------------------------------------------------
  * 提供 createAddPlace({ getMap, onSaved })：
- *   - open()   打开「记录新足迹」弹窗
- *   - 表单：名称 / 类型 / 日期 / 经纬度（可点地图拾取）/ 国家代码 / 城市 / 简介
- *   - 媒体：多文件（照片 / 视频）+ 文字笔记，提交后依次上传到 /api/upload
- *   - 保存成功后调用 onSaved()（main.js 用它立即刷新数据，不必等轮询）
+ *   - open()  打开「记录新足迹」弹窗（新增模式）
+ *   - edit(p) 打开弹窗并预填地点 p 的字段（编辑模式）：可改名称 / 类型 / 日期 /
+ *             经纬度（含地图拾取）/ 国家 / 城市 / 简介，并管理已有媒体（逐条删除）
+ *             与新增媒体（照片 / 视频 / 文字笔记）。
+ *   - 城市输入：输入后本地库 + 在线（Nominatim）补全默认经纬度，省去手填；
+ *             仍可在地图上拾取做微调。
  *
  * 不直接绑 #tm-add：那个按钮由 ui.js 统一调度，点击时调 onAddPlace 回调，
- * main.js 把回调接到 addPlace.open()。
+ * main.js 把回调接到 addPlace.open() / addPlace.edit()。
  */
 
 import { api } from './api.js';
+import { CITIES } from './cities.js';
 import { toast } from './utils.js';
 
 let modal, form, statusEl;
@@ -20,6 +23,9 @@ let onSaved = () => {};
 let tempMarker = null;
 let pickMode = false;
 let pickHandler = null;
+let editingId = null;            // 非 null = 编辑模式
+let existingMedia = [];          // 编辑模式下该地点的已有媒体（含 id）
+let cityAC = null;               // 城市自动补全下拉
 
 function $(id) { return document.getElementById(id); }
 
@@ -29,6 +35,12 @@ function resetForm() {
   if ($('tm-add-lng')) $('tm-add-lng').value = '';
   if ($('tm-add-lat')) $('tm-add-lat').value = '';
   removeTempMarker();
+  // 退出编辑态
+  editingId = null;
+  existingMedia = [];
+  renderExistingMedia();
+  const title = $('tm-add-title');
+  if (title) title.textContent = '记录新足迹';
 }
 
 function removeTempMarker() {
@@ -40,6 +52,169 @@ function showStatus(msg, isError = false) {
   statusEl.textContent = msg || '';
   statusEl.classList.toggle('is-error', !!isError);
 }
+
+/* ---------------- 已有媒体（编辑模式） ---------------- */
+
+function renderExistingMedia() {
+  const box = $('tm-add-existing');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!editingId) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const head = document.createElement('div');
+  head.className = 'tm-exist__head';
+  const total = existingMedia.length;
+  head.innerHTML = `<span>已有媒体（${total}）</span>`
+    + (total ? '<span class="tm-exist__hint">删除后即时生效</span>' : '');
+  box.append(head);
+
+  if (!total) {
+    const empty = document.createElement('p');
+    empty.className = 'tm-exist__empty';
+    empty.textContent = '暂无媒体，可在下方继续添加。';
+    box.append(empty);
+    return;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'tm-exist__grid';
+  existingMedia.forEach((m) => {
+    const cell = document.createElement('div');
+    cell.className = 'tm-exist__cell';
+    const isText = m.type === 'text';
+    const thumb = isText ? '' : (m.type === 'video' ? (m.poster || '') : (m.url || ''));
+    const inner = isText
+      ? `<div class="tm-exist__text">${escapeHtml((m.caption || m.text || '文字笔记').slice(0, 50))}</div>`
+      : `<img class="tm-exist__img" src="${escapeHtml(thumb || './assets/placeholder-photo.svg')}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+    cell.innerHTML = inner
+      + `<button type="button" class="tm-exist__del" data-id="${escapeHtml(m.id)}" title="删除这条媒体" aria-label="删除媒体">`
+      + '<svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>';
+    cell.querySelector('.tm-exist__del').addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (!confirm('确定删除这条媒体？')) return;
+      const id = m.id;
+      try {
+        await api.deleteMedia(id);
+        existingMedia = existingMedia.filter((x) => x.id !== id);
+        renderExistingMedia();
+        toast('已删除一条媒体', 1800);
+      } catch (err) {
+        toast('删除失败：' + (err.message || err), 2600);
+      }
+    });
+    const img = cell.querySelector('img');
+    if (img) img.addEventListener('error', () => { img.src = './assets/placeholder-photo.svg'; });
+    grid.append(cell);
+  });
+  box.append(grid);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+/* ---------------- 城市自动补全（默认经纬度） ---------------- */
+
+function debounce(fn, ms) {
+  let t = 0;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+function ensureCityAC() {
+  if (cityAC) return cityAC;
+  const city = $('tm-add-city');
+  cityAC = document.createElement('div');
+  cityAC.id = 'tm-city-ac';
+  cityAC.className = 'tm-city-ac';
+  cityAC.hidden = true;
+  if (city && city.parentElement) {
+    city.parentElement.style.position = 'relative';
+    city.parentElement.appendChild(cityAC);
+  }
+  return cityAC;
+}
+
+function localMatches(q) {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  return CITIES
+    .filter((c) => c.name.toLowerCase().includes(s) || (c.country || '').toLowerCase().includes(s))
+    .slice(0, 8);
+}
+
+async function onlineMatches(q) {
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5'
+      + '&accept-language=zh-CN&q=' + encodeURIComponent(q);
+    const ctrl = ('AbortController' in window) ? new AbortController() : null;
+    const r = await fetch(url, { signal: ctrl ? ctrl.signal : undefined });
+    if (!r.ok) return [];
+    const arr = await r.json();
+    return (arr || []).map((it) => ({
+      name: it.name || (it.display_name || '').split(',')[0] || '',
+      country: (it.address && it.address.country) || '',
+      cc: ((it.address && it.address.country_code) || '').toUpperCase(),
+      lat: parseFloat(it.lat),
+      lng: parseFloat(it.lon),
+    })).filter((x) => x.name && Number.isFinite(x.lat) && Number.isFinite(x.lng));
+  } catch (_) { return []; }
+}
+
+function renderCityAC(items) {
+  const box = ensureCityAC();
+  box.innerHTML = '';
+  if (!items.length) { box.hidden = true; return; }
+  items.forEach((c) => {
+    const li = document.createElement('button');
+    li.type = 'button';
+    li.className = 'tm-city-ac__item';
+    const sub = [c.country, c.cc].filter(Boolean).join(' · ');
+    li.innerHTML = `<span class="tm-city-ac__name">${escapeHtml(c.name)}</span>`
+      + (sub ? `<span class="tm-city-ac__sub">${escapeHtml(sub)}</span>` : '')
+      + `<span class="tm-city-ac__coord">${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}</span>`;
+    // 用 mousedown 抢在 input blur 之前，避免下拉被先关掉导致点不中
+    li.addEventListener('mousedown', (e) => { e.preventDefault(); pickCity(c); });
+    box.append(li);
+  });
+  box.hidden = false;
+}
+
+function pickCity(c) {
+  if ($('tm-add-city')) $('tm-add-city').value = c.name;
+  if ($('tm-add-lng')) $('tm-add-lng').value = c.lng.toFixed(5);
+  if ($('tm-add-lat')) $('tm-add-lat').value = c.lat.toFixed(5);
+  if (c.cc && $('tm-add-country')) $('tm-add-country').value = c.cc;
+  if (cityAC) cityAC.hidden = true;
+  toast(`已填入「${c.name}」默认坐标，可在地图上继续微调`, 2200);
+}
+
+const onCityInput = debounce(() => {
+  const q = ($('tm-add-city')?.value || '').trim();
+  if (!q) { hideCityAC(); return; }
+  const base = localMatches(q);
+  // 本地优先：立即渲染，绝不等在线请求（Nominatim 慢/被墙也不阻塞下拉）
+  renderCityAC(base);
+  // 本地不足 4 条时，后台再补在线结果；拿到才追加，失败/超时静默，且只在该次输入未变化时覆盖
+  if (base.length < 4) {
+    onlineMatches(q)
+      .then((online) => {
+        if (($('tm-add-city')?.value || '').trim() !== q) return; // 用户已继续输入，丢弃旧结果
+        const seen = new Set(base.map((i) => i.name + '|' + i.lat.toFixed(2) + '|' + i.lng.toFixed(2)));
+        const merged = base.slice();
+        for (const o of online) {
+          const k = o.name + '|' + o.lat.toFixed(2) + '|' + o.lng.toFixed(2);
+          if (!seen.has(k)) { merged.push(o); seen.add(k); }
+        }
+        renderCityAC(merged.slice(0, 8));
+      })
+      .catch(() => {});
+  }
+}, 320);
+
+function hideCityAC() { if (cityAC) cityAC.hidden = true; }
+
+/* ---------------- 初始化 ---------------- */
 
 export function createAddPlace({ getMap, onSaved: saved } = {}) {
   mapGetter = getMap || mapGetter;
@@ -62,14 +237,21 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
     startPick();
   });
 
+  /* 城市自动补全 */
+  $('tm-add-city')?.addEventListener('input', onCityInput);
+  $('tm-add-city')?.addEventListener('focus', onCityInput);
+  $('tm-add-city')?.addEventListener('blur', () => setTimeout(hideCityAC, 150));
+
   /* 提交 */
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     await submit();
   });
 
-  return { open, close };
+  return { open, close, edit };
 }
+
+/* ---------------- 打开 / 关闭 ---------------- */
 
 function open() {
   if (!modal) return;
@@ -82,7 +264,34 @@ function close() {
   if (!modal) return;
   modal.hidden = true;
   cancelPick();
+  hideCityAC();
   resetForm();
+}
+
+function edit(place) {
+  if (!modal || !place) return;
+  resetForm();
+  editingId = place.id;
+  existingMedia = Array.isArray(place.media) ? place.media.slice() : [];
+
+  const set = (id, v) => { const el = $(id); if (el) el.value = (v == null ? '' : v); };
+  set('tm-add-name', place.name);
+  set('tm-add-type', place.type);
+  set('tm-add-date', place.date);
+  set('tm-add-enddate', place.endDate);
+  const lng = place.lng != null ? place.lng : (place.coord && place.coord[0]);
+  const lat = place.lat != null ? place.lat : (place.coord && place.coord[1]);
+  set('tm-add-lng', lng == null ? '' : lng);
+  set('tm-add-lat', lat == null ? '' : lat);
+  set('tm-add-country', place.countryCode || place.country || '');
+  set('tm-add-city', place.city);
+  set('tm-add-desc', place.desc);
+
+  const title = $('tm-add-title');
+  if (title) title.textContent = '编辑足迹';
+  renderExistingMedia();
+  modal.hidden = false;
+  $('tm-add-name')?.focus();
 }
 
 /* ---------------- 地图拾取 ---------------- */
@@ -136,7 +345,7 @@ async function submit() {
 
   if (!name) { showStatus('请填写地点名称', true); return; }
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-    showStatus('请填写有效的经纬度（可在地图上拾取）', true);
+    showStatus('请填写有效的经纬度（可地图拾取，或在城市输入后自动补全）', true);
     return;
   }
 
@@ -145,7 +354,7 @@ async function submit() {
     coord: [lng, lat],
     type: $('tm-add-type')?.value || '旅行',
     date: $('tm-add-date')?.value || '',
-    endDate: $('tm-add-enddate')?.value || '',
+    end_date: $('tm-add-enddate')?.value || '',     // ⚠️ 后端 db 读 end_date（原 endDate 字段名是 bug）
     countryCode: ($('tm-add-country')?.value || '').trim(),
     city: ($('tm-add-city')?.value || '').trim(),
     desc: ($('tm-add-desc')?.value || '').trim(),
@@ -157,12 +366,18 @@ async function submit() {
 
   const submitBtn = $('tm-add-submit');
   if (submitBtn) { submitBtn.disabled = true; }
-  showStatus('正在保存地点…');
+  showStatus(editingId ? '正在保存修改…' : '正在保存地点…');
 
   try {
-    const created = await api.createPlace(place);
-    const id = created && created.id;
-    if (!id) throw new Error('服务端未返回地点 ID');
+    let id;
+    if (editingId) {
+      await api.updatePlace(editingId, place);
+      id = editingId;
+    } else {
+      const created = await api.createPlace(place);
+      id = created && created.id;
+      if (!id) throw new Error('服务端未返回地点 ID');
+    }
 
     let done = 0;
     const total = files.length + (note ? 1 : 0);
@@ -190,7 +405,7 @@ async function submit() {
     }
 
     showStatus('已保存 ✓');
-    toast(`已记录「${name}」`, 2600);
+    toast(editingId ? `已更新「${name}」` : `已记录「${name}」`, 2200);
     onSaved();
     setTimeout(close, 350);
   } catch (err) {

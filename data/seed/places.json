@@ -13,7 +13,7 @@
     "  city         城市名（可选）",
     "  color        单独覆盖该点的图钉颜色（可选）",
     "  cover        卡片封面图（可选，缺省取 media 中第一张图）",
-    "  media        多媒体数组（可选）。缺省时会自动生成占位素材",
+    "  media        多媒体数组（可选）。缺省时该地点无媒体，需自行上传或在文件里填真实 url",
     "",
     "media[] 每一项:",
     "  { \"type\": \"image|video|text\", \"url\": \"...\", \"caption\": \"...\" }",
@@ -27,128 +27,15 @@
     "",
     "顶层还可选的 trips 字段（行程）：见文件末尾 _trips_readme。",
     "",
-    "注意：多媒体当前使用占位素材（图片 picsum.photos，视频为本地 assets/sample.mp4），",
+    "多媒体默认留空，接入真实存储后填写 media[].url 即可显示。",
     "接入真实存储时只需替换 media[].url。"
   ],
-
   "types": {
     "居住": "#4E7398",
     "旅行": "#C86E4A",
     "目的地": "#7E6C9C"
   },
-
-  "places": [
-    { "name": "济南", "coord": [117.07, 36.66], "type": "居住", "date": "2021-12-10", "desc": "常住地" },
-    { "name": "北京", "coord": [116.41, 39.90], "type": "居住", "date": "2019-03-01", "desc": "工作过三年" },
-    { "name": "上海", "coord": [121.47, 31.23], "type": "居住", "date": "2020-06-15" },
-    { "name": "杭州", "coord": [120.19, 30.26], "type": "旅行", "date": "2024-08-05", "desc": "西湖边待了一整天" },
-    { "name": "西安", "coord": [108.95, 34.27], "type": "旅行", "date": "2025-03-12" },
-    { "name": "徐州", "coord": [117.20, 34.26], "type": "旅行", "date": "2023-12-30" },
-    { "name": "青岛", "coord": [120.38, 36.07], "type": "旅行", "date": "2022-06-04", "desc": "夏天的海风" },
-    { "name": "威海", "coord": [122.12, 37.52], "type": "旅行", "date": "2023-06-22" },
-    { "name": "泰安", "coord": [117.08, 36.19], "type": "旅行", "date": "2024-04-04", "desc": "夜爬泰山看日出" },
-    { "name": "天津", "coord": [117.20, 39.13], "type": "旅行", "date": "2026-04-05" },
-    { "name": "成都", "coord": [104.07, 30.57], "type": "旅行", "date": "2021-10-02" },
-    { "name": "三亚", "coord": [109.51, 18.25], "type": "旅行", "date": "2023-01-14", "desc": "第一次冬天穿短袖" },
-    { "name": "哈尔滨", "coord": [126.53, 45.80], "type": "旅行", "date": "2024-01-06", "desc": "零下二十度的冰雕" },
-    { "name": "敦煌", "coord": [94.66, 40.14], "type": "旅行", "date": "2025-05-18", "desc": "鸣沙山与月牙泉" },
-    { "name": "香港", "coord": [114.17, 22.32], "type": "旅行", "date": "2019-11-02" },
-    {
-      "name": "拉萨", "coord": [91.14, 29.65], "type": "旅行", "date": "2022-07-20",
-      "desc": "海拔 3650 米，走两步就要歇一下。",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/lhasa-1/900/675", "caption": "布达拉宫前的清晨" },
-        { "type": "image", "url": "https://picsum.photos/seed/lhasa-2/900/675", "caption": "八廓街的转经人" },
-        { "type": "image", "url": "https://picsum.photos/seed/lhasa-3/900/675", "caption": "纳木错的蓝" },
-        { "type": "text", "caption": "高原上的一天", "text": "早上六点出门，天还没亮，转经的人已经绕着八廓街走了好几圈。\n氧气罐和酥油茶是这趟行程的两件必需品。" }
-      ]
-    },
-
-    { "name": "东京", "coord": [139.69, 35.69], "type": "旅行", "date": "2024-03-28" },
-    {
-      "name": "京都", "coord": [135.77, 35.01], "type": "旅行", "date": "2024-04-01", "endDate": "2024-04-06",
-      "desc": "赶上了樱花满开的那一周。",
-      "country": "日本", "countryCode": "JP", "city": "京都",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/kyoto-1/900/675", "caption": "清水寺的舞台" },
-        { "type": "image", "url": "https://picsum.photos/seed/kyoto-2/900/675", "caption": "哲学之道两侧的樱" },
-        { "type": "image", "url": "https://picsum.photos/seed/kyoto-3/900/675", "caption": "伏见稻荷的千本鸟居" },
-        { "type": "image", "url": "https://picsum.photos/seed/kyoto-4/900/675", "caption": "祇园的傍晚" },
-        { "type": "image", "url": "https://picsum.photos/seed/kyoto-5/900/675", "caption": "岚山竹林" },
-        { "type": "video", "url": "./assets/sample.mp4", "poster": "https://picsum.photos/seed/kyoto-v/900/675", "caption": "鸭川边的一段傍晚" },
-        { "type": "text", "caption": "四月的京都", "text": "2024.04.01 - 2024.04.06\n\n樱花比预报早开了三天，到的时候正好是满开。\n每天走到脚疼，但每天都在想明天要去看哪一棵树。" }
-      ]
-    },
-    { "name": "首尔", "coord": [126.98, 37.57], "type": "旅行", "date": "2023-10-11" },
-    { "name": "曼谷", "coord": [100.50, 13.76], "type": "旅行", "date": "2018-12-20" },
-    { "name": "胡志明市", "coord": [106.63, 10.82], "type": "旅行", "date": "2025-07-08" },
-
-    {
-      "name": "圣托里尼", "coord": [25.43, 36.39], "type": "旅行", "date": "2023-09-12",
-      "desc": "白墙蓝顶，日落时整座岛都是橙色的。",
-      "country": "希腊", "countryCode": "GR",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/santorini-1/900/675", "caption": "伊亚的蓝顶教堂" },
-        { "type": "image", "url": "https://picsum.photos/seed/santorini-2/900/675", "caption": "悬崖上的白房子" },
-        { "type": "image", "url": "https://picsum.photos/seed/santorini-3/900/675", "caption": "爱琴海的颜色" },
-        { "type": "image", "url": "https://picsum.photos/seed/santorini-4/900/675", "caption": "傍晚的港口" },
-        { "type": "text", "caption": "岛上的四天", "text": "住的地方推开窗就是海。\n最难忘的是日落后人群鼓掌的那几秒钟。" }
-      ]
-    },
-    { "name": "罗马", "coord": [12.50, 41.90], "type": "旅行", "date": "2019-06-08" },
-    { "name": "巴黎", "coord": [2.35, 48.86], "type": "旅行", "date": "2018-05-11",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/paris-1/900/675", "caption": "塞纳河边" },
-        { "type": "image", "url": "https://picsum.photos/seed/paris-2/900/675", "caption": "铁塔下的草坪" },
-        { "type": "image", "url": "https://picsum.photos/seed/paris-3/900/675", "caption": "街头的一间面包店" },
-        { "type": "text", "caption": "第一次一个人出国", "text": "英语不太行，比划着买到了第一张地铁票。\n现在想起来还是会笑。" }
-      ]
-    },
-    { "name": "巴塞罗那", "coord": [2.17, 41.39], "type": "旅行", "date": "2018-05-20" },
-    { "name": "柏林", "coord": [13.40, 52.52], "type": "旅行", "date": "2021-08-19" },
-    { "name": "阿姆斯特丹", "coord": [4.90, 52.37], "type": "旅行", "date": "2021-08-25" },
-    { "name": "布拉格", "coord": [14.44, 50.08], "type": "旅行", "date": "2021-08-30" },
-    { "name": "伦敦", "coord": [-0.13, 51.51], "type": "旅行", "date": "2017-09-15" },
-
-    {
-      "name": "纽约", "coord": [-74.01, 40.71], "type": "旅行", "date": "2023-05-20",
-      "desc": "第一次觉得城市可以吵到这种程度。",
-      "country": "美国", "countryCode": "US",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/nyc-1/900/675", "caption": "从对岸看曼哈顿" },
-        { "type": "image", "url": "https://picsum.photos/seed/nyc-2/900/675", "caption": "中央公园的长椅" },
-        { "type": "image", "url": "https://picsum.photos/seed/nyc-3/900/675", "caption": "地铁里的街头艺人" },
-        { "type": "image", "url": "https://picsum.photos/seed/nyc-4/900/675", "caption": "布鲁克林大桥" },
-        { "type": "video", "url": "./assets/sample.mp4", "poster": "https://picsum.photos/seed/nyc-v/900/675", "caption": "时代广场的十秒钟" }
-      ]
-    },
-    { "name": "旧金山", "coord": [-122.42, 37.77], "type": "目的地", "date": "2027-01-01", "desc": "想去看金门大桥的雾" },
-    { "name": "孟买", "coord": [72.88, 19.08], "type": "目的地", "date": "2027-03-15", "desc": "还只是个计划" },
-
-    { "name": "悉尼", "coord": [151.21, -33.87], "type": "旅行", "date": "2019-02-14" },
-    {
-      "name": "皇后镇", "coord": [168.66, -45.03], "type": "旅行", "date": "2023-11-20",
-      "desc": "南半球的春天，雪山还没化。",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/qstown-1/900/675", "caption": "瓦卡蒂普湖" },
-        { "type": "image", "url": "https://picsum.photos/seed/qstown-2/900/675", "caption": "缆车上的镇子" },
-        { "type": "video", "url": "./assets/sample.mp4", "poster": "https://picsum.photos/seed/qstown-v/900/675", "caption": "湖边的一小段风" },
-        { "type": "text", "caption": "南岛的一周", "text": "从基督城一路开到皇后镇，路上几乎没有别的车。\n在湖边坐了一下午，什么也没干。" }
-      ]
-    },
-    {
-      "name": "雷克雅未克", "coord": [-21.94, 64.15], "type": "旅行", "date": "2022-09-05",
-      "media": [
-        { "type": "image", "url": "https://picsum.photos/seed/reyk-1/900/675", "caption": "教堂前的彩色屋顶" },
-        { "type": "image", "url": "https://picsum.photos/seed/reyk-2/900/675", "caption": "环岛路上的荒原" },
-        { "type": "image", "url": "https://picsum.photos/seed/reyk-3/900/675", "caption": "夜里看到的极光" }
-      ]
-    },
-    { "name": "马拉喀什", "coord": [-7.99, 31.63], "type": "旅行", "date": "2025-02-10" },
-    { "name": "开罗", "coord": [31.24, 30.04], "type": "旅行", "date": "2024-10-12" },
-    { "name": "伊斯坦布尔", "coord": [28.98, 41.01], "type": "旅行", "date": "2022-05-03" }
-  ],
-
+  "places": [],
   "_trips_readme": [
     "trips 是「次」，places 是「点」：一次行程可以覆盖多座城市。",
     "统计卡里的「次旅行」取 trips 的长度；不写 trips 时退化为有日期的到访记录数。",
@@ -159,39 +46,5 @@
     "并在弹窗上半部的小地图上按先后顺序「走一遍」这条路线。分组行的信息行只写国家或大洲，不列具体城市。",
     "单地点行程退化成足迹时间线上的一行，标题就是行程名 —— 所以它们同样会在界面上出现，不会消失。"
   ],
-  "trips": [
-    { "name": "英伦初秋", "date": "2017-09-15", "places": ["伦敦"], "desc": "第一次一个人坐长途飞机" },
-    { "name": "西欧初见", "date": "2018-05-11", "endDate": "2018-05-20", "places": ["巴黎", "巴塞罗那"] },
-    { "name": "曼谷跨年", "date": "2018-12-20", "places": ["曼谷"] },
-    { "name": "澳洲初体验", "date": "2019-02-14", "endDate": "2019-02-21", "places": ["悉尼"] },
-    { "name": "在北京的三年", "date": "2019-03-01", "places": ["北京"] },
-    { "name": "罗马假日", "date": "2019-06-08", "places": ["罗马"] },
-    { "name": "香港周末", "date": "2019-11-02", "places": ["香港"] },
-    { "name": "上海停留", "date": "2020-06-15", "places": ["上海"] },
-    { "name": "欧洲五城", "date": "2021-08-19", "endDate": "2021-08-30", "places": ["柏林", "阿姆斯特丹", "布拉格"] },
-    { "name": "川渝之行", "date": "2021-10-02", "places": ["成都"] },
-    { "name": "常住济南", "date": "2021-12-10", "places": ["济南"] },
-    { "name": "土耳其之行", "date": "2022-05-03", "places": ["伊斯坦布尔"] },
-    { "name": "青岛夏天", "date": "2022-06-04", "places": ["青岛"] },
-    { "name": "西藏十六天", "date": "2022-07-20", "places": ["拉萨"] },
-    { "name": "冰岛环岛", "date": "2022-09-05", "endDate": "2022-09-14", "places": ["雷克雅未克"] },
-    { "name": "三亚过冬", "date": "2023-01-14", "places": ["三亚"] },
-    { "name": "美国东岸", "date": "2023-05-20", "endDate": "2023-05-27", "places": ["纽约"] },
-    { "name": "威海三日", "date": "2023-06-22", "places": ["威海"] },
-    { "name": "爱琴海假期", "date": "2023-09-12", "endDate": "2023-09-16", "places": ["圣托里尼"] },
-    { "name": "首尔秋天", "date": "2023-10-11", "places": ["首尔"] },
-    { "name": "南岛自驾", "date": "2023-11-20", "endDate": "2023-11-27", "places": ["皇后镇"] },
-    { "name": "徐州小聚", "date": "2023-12-30", "places": ["徐州"] },
-    { "name": "东北冰雪", "date": "2024-01-06", "places": ["哈尔滨"] },
-    { "name": "东京中转", "date": "2024-03-28", "places": ["东京"] },
-    { "name": "京都赏樱", "date": "2024-04-01", "endDate": "2024-04-06", "places": ["京都", "东京"] },
-    { "name": "泰山日出", "date": "2024-04-04", "places": ["泰安"] },
-    { "name": "杭州西湖", "date": "2024-08-05", "places": ["杭州"] },
-    { "name": "埃及古文明", "date": "2024-10-12", "endDate": "2024-10-19", "places": ["开罗"] },
-    { "name": "摩洛哥之春", "date": "2025-02-10", "places": ["马拉喀什"] },
-    { "name": "关中行", "date": "2025-03-12", "places": ["西安"] },
-    { "name": "河西走廊", "date": "2025-05-18", "places": ["敦煌"] },
-    { "name": "越南西贡", "date": "2025-07-08", "places": ["胡志明市"] },
-    { "name": "京津周末", "date": "2026-04-05", "places": ["天津"] }
-  ]
+  "trips": []
 }

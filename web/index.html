@@ -60,6 +60,8 @@ if (location.protocol === 'file:') {
     <g id="i-more"><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/><circle cx="5" cy="12" r="1.4"/></g>
     <g id="i-arrow"><path d="M5 12h14M12 5l7 7-7 7"/></g>
     <g id="i-globe"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18"/><path d="M12 2.8a15 15 0 0 1 0 18.4 15 15 0 0 1 0-18.4z"/></g>
+    <g id="i-edit"><path d="M14.5 5.5 18.5 9.5M4 20l1.2-4.3 10.3-10.3a2 2 0 0 1 2.8 0l1.8 1.8a2 2 0 0 1 0 2.8L9.3 18.8 5 20z"/></g>
+    <g id="i-trash"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0 1 13a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-13"/></g>
   </defs>
 </svg>
 
@@ -168,6 +170,9 @@ if (location.protocol === 'file:') {
           </button>
           <button class="btn btn--primary" id="tm-add">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>记录新足迹
+          </button>
+          <button class="btn btn--ghost" id="tm-trip">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-calendar"/></svg>新建行程
           </button>
           <button class="btn btn--ghost" id="tm-logout" hidden>
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>退出
@@ -369,9 +374,38 @@ if (location.protocol === 'file:') {
           <h3 class="modal__title" id="tm-modal-title">—</h3>
           <p class="modal__sub" id="tm-modal-sub">—</p>
         </div>
+        <button class="modal__edit" id="tm-modal-edit" type="button" hidden>
+          <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑
+        </button>
+        <button class="modal__delete" id="tm-modal-delete" type="button" hidden>
+          <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg>删除
+        </button>
       </div>
       <div class="modal__tabs" id="tm-modal-tabs" role="tablist"></div>
       <div class="modal__content" id="tm-modal-content"></div>
+
+      <!-- 补充上传媒体（仅单地点详情可见；图片/视频走文件上传，文本走输入框） -->
+      <div class="modal__addmedia" id="tm-modal-addmedia">
+        <button type="button" class="addmedia__toggle" id="tm-modal-addbtn" hidden>
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>添加媒体
+        </button>
+        <div class="addmedia__panel" id="tm-modal-addpanel" hidden>
+          <div class="addmedia__group">
+            <label class="addmedia__file" for="tm-modal-file">
+              <svg class="ico" viewBox="0 0 24 24"><use href="#i-image"/></svg><span>选择图片 / 视频</span>
+            </label>
+            <input id="tm-modal-file" type="file" accept="image/*,video/*" multiple hidden />
+            <input id="tm-modal-cap1" class="form-input addmedia__cap" type="text" placeholder="媒体说明（可选）" maxlength="80" />
+            <button type="button" class="btn btn--primary addmedia__go" id="tm-modal-upload">上传</button>
+          </div>
+          <div class="addmedia__group">
+            <textarea id="tm-modal-text" class="form-input addmedia__text" rows="2" maxlength="1000" placeholder="写点文字笔记…"></textarea>
+            <input id="tm-modal-cap2" class="form-input addmedia__cap" type="text" placeholder="笔记标题（可选）" maxlength="80" />
+            <button type="button" class="btn btn--primary addmedia__go" id="tm-modal-addtext">添加文字</button>
+          </div>
+          <p class="addmedia__status" id="tm-modal-addstatus"></p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -406,11 +440,11 @@ if (location.protocol === 'file:') {
       </button>
     </header>
     <form id="tm-add-form" class="modal-edit__body">
-      <div class="form-row">
-        <label class="form-label" for="tm-add-name">地点名称 *</label>
-        <input id="tm-add-name" class="form-input" type="text" placeholder="如：京都" maxlength="40" required />
-      </div>
       <div class="form-row form-row--2">
+        <div>
+          <label class="form-label" for="tm-add-name">地点名称 *</label>
+          <input id="tm-add-name" class="form-input" type="text" placeholder="如：京都" maxlength="40" required />
+        </div>
         <div>
           <label class="form-label" for="tm-add-type">类型</label>
           <select id="tm-add-type" class="form-input">
@@ -419,13 +453,25 @@ if (location.protocol === 'file:') {
             <option value="目的地">目的地</option>
           </select>
         </div>
+      </div>
+      <div class="form-row form-row--2">
         <div>
-          <label class="form-label" for="tm-add-date">日期</label>
+          <label class="form-label" for="tm-add-date">开始日期</label>
           <input id="tm-add-date" class="form-input" type="date" />
         </div>
         <div>
-          <label class="form-label" for="tm-add-enddate">结束日期（可选）</label>
+          <label class="form-label" for="tm-add-enddate">结束日期</label>
           <input id="tm-add-enddate" class="form-input" type="date" />
+        </div>
+      </div>
+      <div class="form-row form-row--2">
+        <div>
+          <label class="form-label" for="tm-add-country">国家代码（可选）</label>
+          <input id="tm-add-country" class="form-input" type="text" placeholder="如 CN / JP" maxlength="3" />
+        </div>
+        <div>
+          <label class="form-label" for="tm-add-city">城市（可选）</label>
+          <input id="tm-add-city" class="form-input" type="text" placeholder="如 京都" maxlength="40" />
         </div>
       </div>
       <div class="form-row form-row--2">
@@ -441,19 +487,12 @@ if (location.protocol === 'file:') {
       <div class="form-row">
         <button type="button" class="btn btn--ghost" id="tm-add-pick">在地图上拾取坐标</button>
       </div>
-      <div class="form-row form-row--2">
-        <div>
-          <label class="form-label" for="tm-add-country">国家代码（可选）</label>
-          <input id="tm-add-country" class="form-input" type="text" placeholder="如 CN / JP" maxlength="3" />
-        </div>
-        <div>
-          <label class="form-label" for="tm-add-city">城市（可选）</label>
-          <input id="tm-add-city" class="form-input" type="text" placeholder="如 京都" maxlength="40" />
-        </div>
-      </div>
       <div class="form-row">
         <label class="form-label" for="tm-add-desc">简介（可选）</label>
         <textarea id="tm-add-desc" class="form-input" rows="2" maxlength="300" placeholder="一两句回忆"></textarea>
+      </div>
+      <div class="form-row">
+        <div id="tm-add-existing" class="tm-exist" hidden></div>
       </div>
       <div class="form-row">
         <label class="form-label" for="tm-add-files">照片 / 视频</label>
@@ -471,6 +510,38 @@ if (location.protocol === 'file:') {
       <div class="modal-edit__foot">
         <button type="button" class="btn btn--ghost" id="tm-add-cancel">取消</button>
         <button type="submit" class="btn btn--primary" id="tm-add-submit">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 新建行程（多地点行程组） ================= -->
+<div class="modal-edit" id="tm-trip-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-labelledby="tm-trip-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-trip-title">新建行程</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <form id="tm-trip-form" class="modal-edit__body">
+      <div class="form-row">
+        <label class="form-label" for="tm-trip-name">行程名称 *</label>
+        <input id="tm-trip-name" class="form-input" type="text" placeholder="如：关西之旅" maxlength="40" required />
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-trip-date">开始日期</label>
+        <input id="tm-trip-date" class="form-input" type="date" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">参与地点 *（勾选要编入本次行程的地点）</label>
+        <div id="tm-trip-places" class="tm-trip-list"></div>
+      </div>
+      <p class="form-status" id="tm-trip-status"></p>
+      <div class="modal-edit__foot">
+        <button type="button" class="btn btn--ghost" id="tm-trip-cancel">取消</button>
+        <button type="submit" class="btn btn--primary" id="tm-trip-submit">保存行程</button>
       </div>
     </form>
   </div>

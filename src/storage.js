@@ -218,6 +218,21 @@ async function objectExists(key) {
   return fs.existsSync(path.join(localDir, key));
 }
 
+/**
+ * 删除对象（媒体被删除时清掉实际文件 / OSS 对象，避免孤儿数据无限堆积）。
+ * MinIO 走 removeObject；本地模式直接 unlink。对象已不存在也算成功（幂等）。
+ * @param {string} key 对象键（即 /media/<key> 的尾段）
+ */
+async function deleteObject(key) {
+  if (!key) return;
+  if (useMinio) {
+    try { await client.removeObject(config.minio.bucket, key); }
+    catch (_) { /* 已不存在等异常：忽略，保持幂等 */ }
+  } else {
+    try { fs.unlinkSync(path.join(localDir, key)); } catch (_) { /* 已不存在：忽略 */ }
+  }
+}
+
 module.exports = {
   getStorageInfo,
   initStorage,
@@ -227,6 +242,7 @@ module.exports = {
   saveObject,
   getObjectStream,
   objectExists,
+  deleteObject,
   bucketReady: () => bucketReady,
   TMP_DIR,
 };

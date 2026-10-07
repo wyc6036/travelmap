@@ -25,12 +25,16 @@
 import { CONFIG, MEDIA_LABELS, regionLabel } from './config.js';
 import {
   escapeHtml, formatDateRange, formatDateDot, clamp,
-  rafThrottle, distanceKm, warnOnce, mixHex,
+  rafThrottle, distanceKm, warnOnce, mixHex, toast,
 } from './utils.js';
 import { createMap, setBaseStyle } from './map.js';
 import { addCountryLayers, applyVisitedCountries, partsOfCountry } from './countries.js';
 import { PIN, PIN_BODY, PIN_LIFT, pinSvg } from './markers.js';
 import { createRouteAnim } from './route.js';
+import { api } from './api.js';
+
+/** 局部 $：detail-modal 模块内统一用 getElementById 取 DOM */
+function $(id) { return document.getElementById(id); }
 
 /** 地图收缩后的最小高度（仍保留足够的地理上下文） */
 const MIN_MAP_H = 132;
@@ -82,7 +86,7 @@ function isCloseTarget(target) {
 }
 
 export function createDetailModal({
-  colorOf, worldGeoJSON, getPlaces, getTrips, getVisited, getStyleKey,
+  colorOf, worldGeoJSON, getPlaces, getTrips, getVisited, getStyleKey, onEdit, onDeleted, onMediaChanged,
 }) {
   const modal = document.getElementById('tm-modal');
   const panel = modal.querySelector('.modal__panel');
@@ -95,6 +99,8 @@ export function createDetailModal({
   const contentEl = document.getElementById('tm-modal-content');
   const badgeEl = document.getElementById('tm-modal-badge');
   const closeBtn = document.getElementById('tm-modal-close');
+  const editBtn = document.getElementById('tm-modal-edit');
+  const deleteBtn = document.getElementById('tm-modal-delete');
 
   const lightbox = document.getElementById('tm-lightbox');
   const lbStage = document.getElementById('tm-lb-stage');
@@ -364,8 +370,7 @@ export function createDetailModal({
   }
 
   function mediaCell(item, list, idx, { wide = false } = {}) {
-    const cell = document.createElement('button');
-    cell.type = 'button';
+    const cell = document.createElement('div');
     cell.className = `mgrid__cell${item.type === 'video' ? ' mgrid__cell--video' : ''}${wide ? ' mgrid__cell--wide' : ''}`;
     cell.title = item.caption || '点击全屏查看';
 
@@ -382,8 +387,37 @@ export function createDetailModal({
       img.src = './assets/placeholder-photo.svg';
     });
 
+    /* 单地点模式下，每个格子右上角挂一个删除按钮（行程模式下不提供，避免误删归属不明的媒体） */
+    const del = mediaDeleteBtn(item);
+    if (del) cell.appendChild(del);
+
     cell.addEventListener('click', () => openLightbox(list, idx));
     return cell;
+  }
+
+  /** 媒体删除按钮：仅单地点详情出现（行程模式媒体归属不定，不在此处提供删除）。 */
+  function mediaDeleteBtn(item) {
+    if (current?.kind !== 'place' || !item || !item.id) return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mgrid__del';
+    btn.title = '删除这条媒体';
+    btn.setAttribute('aria-label', '删除媒体');
+    /* 小尺寸垃圾桶：直线版、桶身略短，让视觉重心在 24px viewBox 中更居中 */
+    btn.innerHTML = '<svg class="ico ico--sm" viewBox="0 0 24 24"><path d="M6 7h12"/><path d="M10 7V5h4v2"/><path d="M8 8l1 9h6l1-9"/></svg>';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!confirm('确定删除这条媒体？')) return;
+      try {
+        await api.deleteMedia(item.id);
+        toast('已删除一条媒体', 1800);
+        if (typeof onMediaChanged === 'function') onMediaChanged();
+      } catch (err) {
+        toast('删除失败：' + (err.message || err), 2600);
+      }
+    });
+    return btn;
   }
 
   function renderContent(view) {
@@ -399,6 +433,8 @@ export function createDetailModal({
         card.style.marginBottom = '10px';
         card.innerHTML = (m.caption ? `<p class="notecard__title">${escapeHtml(m.caption)}</p>` : '')
           + escapeHtml(m.text || '');
+        const del = mediaDeleteBtn(m);
+        if (del) { del.classList.add('mgrid__del--static'); card.appendChild(del); }
         wrap.append(card);
       });
       contentEl.append(wrap);
@@ -596,6 +632,17 @@ export function createDetailModal({
     dotEl.style.background = view.color;
     subEl.textContent = view.sub;
     badgeEl.textContent = view.badge;
+    // 「编辑」仅对单地点有效（行程编辑是另一回事，未开放）
+    if (editBtn) editBtn.hidden = view.kind !== 'place';
+    // 「删除」同样仅对单地点有效
+    if (deleteBtn) deleteBtn.hidden = view.kind !== 'place';
+    // 「添加媒体」：仅单地点详情可见；每次打开都收起面板、清空状态
+    const addBtn = $('tm-modal-addbtn');
+    if (addBtn) addBtn.hidden = view.kind !== 'place';
+    const panel = $('tm-modal-addpanel');
+    if (panel) panel.hidden = true;
+    const statusEl = $('tm-modal-addstatus');
+    if (statusEl) statusEl.textContent = '';
 
     renderTabs(view);
     renderContent(view);
@@ -667,10 +714,110 @@ export function createDetailModal({
   }
 
   /* =========================================================
+   * 详情页：补充上传媒体（图片 / 视频 / 文本）
+   * ---------------------------------------------------------
+   * 只针对「单地点」详情：把媒体挂到 current.ref.id 下。
+   * 上传成功后回调 onMediaChanged（main 接到 refreshData），弹窗会用
+   * 新数据自动 refresh，不必再绕回「编辑足迹」弹窗。
+   * ========================================================= */
+  function setAddStatus(msg, isError = false) {
+    const el = $('tm-modal-addstatus');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+
+  async function uploadPickedFiles() {
+    const input = $('tm-modal-file');
+    const files = Array.from(input?.files || []);
+    if (!files.length) { setAddStatus('请先选择图片或视频', true); return; }
+    const id = current?.ref?.id;
+    if (!id) return;
+    const caption = ($('tm-modal-cap1')?.value || '').trim();
+    setAddStatus('正在上传…');
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('placeId', id);
+        fd.append('file', file);
+        fd.append('caption', caption);
+        await api.uploadMedia(fd);
+      }
+      setAddStatus('已上传 ✓');
+      toast('已添加媒体', 2000);
+      if (input) input.value = '';
+      const cap1 = $('tm-modal-cap1'); if (cap1) cap1.value = '';
+      if (typeof onMediaChanged === 'function') onMediaChanged();
+    } catch (e) {
+      setAddStatus('上传失败：' + (e.message || e), true);
+    }
+  }
+
+  async function addTextNote() {
+    const ta = $('tm-modal-text');
+    const text = (ta?.value || '').trim();
+    if (!text) { setAddStatus('请先输入文字内容', true); return; }
+    const id = current?.ref?.id;
+    if (!id) return;
+    const caption = ($('tm-modal-cap2')?.value || '').trim();
+    setAddStatus('正在保存文字…');
+    try {
+      const fd = new FormData();
+      fd.append('placeId', id);
+      fd.append('kind', 'text');
+      fd.append('text_body', text);
+      fd.append('caption', caption);
+      await api.uploadMedia(fd);
+      setAddStatus('已添加 ✓');
+      toast('已添加文字笔记', 2000);
+      if (ta) ta.value = '';
+      const cap2 = $('tm-modal-cap2'); if (cap2) cap2.value = '';
+      if (typeof onMediaChanged === 'function') onMediaChanged();
+    } catch (e) {
+      setAddStatus('保存失败：' + (e.message || e), true);
+    }
+  }
+
+  function toggleAddPanel() {
+    const panel = $('tm-modal-addpanel');
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+  }
+
+  /* =========================================================
    * 事件绑定
    * ========================================================= */
   bodyEl.addEventListener('scroll', onScroll, { passive: true });
   closeBtn.addEventListener('click', close);
+
+  /* 详情页：补充上传媒体（仅单地点模式可用，按钮可见性由 mount 控制） */
+  $('tm-modal-addbtn')?.addEventListener('click', toggleAddPanel);
+  $('tm-modal-upload')?.addEventListener('click', uploadPickedFiles);
+  $('tm-modal-addtext')?.addEventListener('click', addTextNote);
+
+  /* 编辑当前地点：先关详情弹窗，再把地点交给新增/编辑弹窗 */
+  editBtn?.addEventListener('click', () => {
+    const ref = current?.ref;
+    if (current?.kind !== 'place' || !ref) return;
+    close();
+    if (typeof onEdit === 'function') onEdit(ref);
+  });
+
+  /* 删除当前地点：先二次确认（破坏性操作，必须显式确认）→ 调后端删除 →
+     关弹窗 → 通知上层刷新地图打点。后端会连带清掉该地点下的底层媒体文件，
+     所以删除后数据库与磁盘都不会留下孤儿记录。 */
+  deleteBtn?.addEventListener('click', async () => {
+    const ref = current?.ref;
+    if (current?.kind !== 'place' || !ref) return;
+    if (!confirm(`确定删除「${ref.name}」及其所有媒体吗？\n此操作不可恢复。`)) return;
+    try {
+      await api.deletePlace(ref.id);
+      close();
+      if (typeof onDeleted === 'function') onDeleted();
+    } catch (e) {
+      toast(`删除失败：${e.message || '未知错误'}`);
+    }
+  });
 
   modal.addEventListener('click', (e) => {
     if (isCloseTarget(e.target)) close();

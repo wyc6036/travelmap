@@ -21,7 +21,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 
 const { DATA_DIR, uid, getExport, maybeSeed, saveTypes, getMeta, setMeta,
-  createPlace, deletePlace, createTrip, deleteTrip, addMedia,
+  createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
   markMediaReady, markMediaError } = require('./src/db');
 const { AUTH_ENABLED, requireAuth, login, makeToken } = require('./src/auth');
 const storage = require('./src/storage');
@@ -149,6 +149,17 @@ app.put('/api/trips/:id', write, (req, res) => {
 app.delete('/api/trips/:id', write, (req, res) => {
   deleteTrip(req.params.id);
   res.json({ ok: true });
+});
+
+/* 删除单条媒体：删 DB 行 + 底层对象（图 / 缩略图 / 视频 / 首帧） */
+app.delete('/api/media/:id', write, async (req, res) => {
+  try {
+    const ok = await deleteMedia(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || '删除失败' });
+  }
 });
 
 app.post('/api/types', write, (req, res) => {

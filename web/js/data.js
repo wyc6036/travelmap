@@ -77,53 +77,12 @@ function normalizeMediaItem(item, place, index) {
   };
 }
 
-/** 占位素材（真实存储方案确定后，直接替换 places.json 里的 media 即可） */
-const PLACEHOLDER_VIDEO = './assets/sample.mp4';
-const PLACEHOLDER_PHOTO_COUNT = 4;
-
-function placeholderPhoto(seed, size = 900) {
-  return `https://picsum.photos/seed/${encodeURIComponent(seed)}/${size}/${Math.round(size * 0.75)}`;
-}
-
 /**
- * 为没有 media 的地点生成稳定的占位多媒体。
- * 用 地点名+下标 作为种子，保证每次刷新同一地点拿到同一批图，视觉上不会乱跳。
+ * 占位素材已禁用：初始化状态不展示任何演示图/视频，用户上传真实媒体后才显示。
+ * 如需恢复演示效果，把 buildPlaceholderMedia 改回原来生成占位图的逻辑即可。
  */
-function buildPlaceholderMedia(place) {
-  const seedBase = `${place.name}-${place.lng.toFixed(2)}-${place.lat.toFixed(2)}`;
-  const h = hashString(seedBase);
-  const count = PLACEHOLDER_PHOTO_COUNT - (h % 2);          // 3~4 张
-  const items = [];
-
-  for (let i = 0; i < count; i += 1) {
-    items.push({
-      type: 'image',
-      url: placeholderPhoto(`${seedBase}-${i}`),
-      caption: `${place.name} · 旅途随拍 ${i + 1}`,
-      poster: '',
-      raw: { generated: true },
-      id: `g${i}`,
-    });
-  }
-
-  if (h % 3 !== 2) {
-    items.push({
-      type: 'video',
-      url: PLACEHOLDER_VIDEO,
-      caption: `${place.name} · 一段路上的片段`,
-      poster: placeholderPhoto(`${seedBase}-video`),
-      raw: { generated: true },
-      id: 'gv',
-    });
-  }
-
-  const note = place.desc
-    ? place.desc
-    : `在${place.name}停留的这几天，天气和市场的声音都记得很清楚。\n`
-      + `（这条文字是占位内容，替换 places.json 里的 media 字段即可显示真实笔记。）`;
-  items.push({ type: 'text', text: note, caption: `${place.name} · 旅行笔记`, raw: { generated: true }, id: 'gt' });
-
-  return items;
+function buildPlaceholderMedia(/* place */) {
+  return [];
 }
 
 /* =========================================================

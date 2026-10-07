@@ -69,4 +69,7 @@ export const api = {
 
   /* 媒体上传：传入 FormData（可含 file，或纯文字 text_body） */
   uploadMedia: (formData) => req('/upload', { method: 'POST', body: formData }),
+
+  /* 删除单条媒体（按 id） */
+  deleteMedia: (id) => req(`/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

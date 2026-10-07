@@ -159,7 +159,7 @@ function pickDom(map) {
   return out;
 }
 
-export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, onOpenTrip, onAddPlace }) {
+export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip }) {
   const dom = pickDom({
     nav: '#tm-nav',
     scroll: '#tm-scroll',
@@ -167,6 +167,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     sub: '#tm-view-sub',
     share: '#tm-share',
     add: '#tm-add',
+    tripAdd: '#tm-trip',
     search: '#tm-search',
     styleToggle: '#tm-style-toggle',
 
@@ -692,9 +693,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
         <div class="sect__title">说明</div>
       </div>
       <div class="notecard">
-        本项目为纯前端演示，无后端与账号体系。"记录新足迹"通过编辑 places.json 完成；
-        多媒体资料目前使用占位素材（图片来自 picsum.photos，视频为本地样例），
-        后续接入真实存储时只需替换 media[].url。
+        本项目支持上传真实照片 / 视频 / 笔记。点「记录新足迹」新增地点并上传媒体；
+        未上传媒体时该地点不显示图片，上传后自动出现。
       </div>`;
 
     const chips = root.querySelector('#tm-style-chips');
@@ -811,6 +811,11 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
   dom.add.addEventListener('click', () => {
     if (typeof onAddPlace === 'function') onAddPlace();
     else toast('新增足迹功能未就绪', 2600);
+  });
+
+  dom.tripAdd.addEventListener('click', () => {
+    if (typeof onAddTrip === 'function') onAddTrip();
+    else toast('新建行程功能未就绪', 2600);
   });
 
   let searchTimer = null;
