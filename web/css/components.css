@@ -1,0 +1,1196 @@
+/* =========================================================
+   components.css · 组件
+   按钮 / 导航 / 卡片 / 地图叠加层 / 图钉 / 图例 / 列表
+   ========================================================= */
+
+/* =========================================================
+   按钮
+   ========================================================= */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+.btn:active { transform: translateY(1px); }
+
+.btn--ghost {
+  background: var(--surface);
+  border-color: var(--line-2);
+  color: var(--ink);
+  box-shadow: var(--sh-1);
+}
+.btn--ghost:hover { background: var(--surface); border-color: var(--primary); color: var(--primary-ink); }
+
+.btn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 2px 8px rgba(124, 156, 195, .35);
+}
+.btn--primary:hover { background: var(--primary-dark); }
+.btn--primary .ico { stroke-width: 2.1; }
+
+.btn--pill {
+  padding: 7px 14px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.btn--pill:hover { background: #D2DEEE; }
+
+.btn--icon {
+  width: 36px; height: 36px; padding: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  border-color: var(--line-2);
+  color: var(--ink-2);
+  box-shadow: var(--sh-1);
+}
+.btn--icon:hover { color: var(--primary-ink); border-color: var(--primary); }
+.btn--plain { background: transparent; border-color: transparent; box-shadow: none; width: 30px; height: 30px; }
+.btn--plain:hover { background: var(--bg-warm); border-color: transparent; }
+
+.link {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 2px 0;
+  font-size: var(--fs-sm); font-weight: 600; color: var(--primary-ink);
+  cursor: pointer; border-radius: var(--r-xs);
+}
+.link:hover { color: var(--primary-dark); }
+.link .ico { transition: transform var(--dur-fast) var(--ease); }
+.link:hover .ico { transform: translateX(2px); }
+
+/* 搜索框 */
+.searchbar {
+  display: flex; align-items: center; gap: 7px;
+  height: 36px; padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  color: var(--ink-3);
+  box-shadow: var(--sh-1);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  min-width: 176px;
+}
+.searchbar:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-tint); }
+.searchbar input {
+  border: 0; background: none; outline: none;
+  font-size: var(--fs-md); color: var(--ink); width: 100%; min-width: 0;
+}
+.searchbar input::placeholder { color: var(--ink-3); }
+.searchbar input::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+/* =========================================================
+   侧栏导航
+   ========================================================= */
+.nav__item {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0; border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.nav__item:hover { background: var(--bg-warm); color: var(--ink); }
+.nav__item.is-active {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+.nav__item.is-active .ico { stroke-width: 1.9; }
+
+/* 用户卡 */
+.usercard {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 13px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+}
+.usercard__head { display: flex; align-items: center; gap: 9px; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex: 0 0 auto; box-shadow: var(--sh-1); }
+.avatar svg { width: 100%; height: 100%; }
+.usercard__hi { font-size: var(--fs-lg); font-weight: 600; }
+.usercard__line { font-size: var(--fs-md); color: var(--ink-2); }
+.usercard__line b { color: var(--ink); font-weight: 600; }
+
+.progress {
+  height: 6px; border-radius: var(--r-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress i {
+  display: block; height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, #9FBBD9, var(--primary));
+  transition: width 1.1s var(--ease-out);
+}
+
+/* =========================================================
+   卡片
+   ========================================================= */
+.card {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+  overflow: hidden;
+  min-width: 0;
+}
+.card__head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px var(--pad-card) 0;
+}
+.card__head--spread { justify-content: space-between; }
+.card__title { font-size: var(--fs-lg); font-weight: 600; }
+.card__body { padding: 12px var(--pad-card); flex: 1 1 auto; min-width: 0; }
+.card__foot {
+  padding: 10px var(--pad-card) 12px;
+  display: flex; justify-content: center;
+  border-top: 1px solid var(--line-soft);
+}
+/* 卡脚：默认居中；「旅途海报」那张改成右对齐，见 css/poster.css */
+
+/* ---------- 「选中地点」卡片：2026-10-06 已整卡删除 ----------
+   它只有点图钉才更新，静止时一律是「选择一处足迹」的占位态，
+   占着下半区最大的一块地方却没内容；换成「旅途海报」墙（css/poster.css + js/poster.js）。
+   ⚠️ .selected__* 这一组类名连同 index.html 里的 #tm-sel-* 一起删干净了，
+      别只删一半：pickDom() 找不到元素会直接报"启动失败"。 */
+
+/* 标签页 */
+.tabs { display: flex; align-items: center; gap: 4px; overflow-x: auto; }
+.tabs__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px 8px;
+  border: 0; border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.tabs__btn:hover { color: var(--ink); }
+.tabs__btn.is-active { color: var(--primary-ink); border-bottom-color: var(--primary); font-weight: 600; }
+
+/* 筛选 chips */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  padding: 6px 13px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.chip:hover { border-color: var(--primary); color: var(--primary-ink); }
+.chip.is-active { background: var(--primary-soft); border-color: transparent; color: var(--primary-ink); font-weight: 600; }
+
+/* 分类圆点 */
+.typeDot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ink-3); flex: 0 0 auto;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, .04);
+}
+
+/* =========================================================
+   地图卡片
+   ========================================================= */
+.mapcard {
+  position: relative;
+  height: var(--map-h);
+  border-radius: var(--r-lg);
+  background: var(--map-ocean);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--sh-2);
+  overflow: hidden;
+  isolation: isolate;
+}
+.mapcard__canvas { position: absolute; inset: 0; }
+
+/* ---------- 足迹概览（整块可收起） ----------
+   左下角是一个浮层组：小开关 + 「足迹概览」卡。卡片**默认整块收起**，
+   只留那个小开关；点开关才把整张卡展开。占地问题靠「默认藏起来」解决，
+   **不是**改卡片本身 —— 卡内所有尺寸都回到原设计（内边距 13/16px、
+   数字 --fs-3xl 28px、148px 最小宽度、--r-lg 圆角），
+   之前那轮「把卡整体缩小」的改动已全部还原。
+
+   定位取巧：.statwrap 负责 absolute 定位，卡片在里面正常流式排布，
+   于是展开时卡片的左下角**正好落在原来的 left:16px / bottom:16px**；
+   开关在展开态转为绝对定位（挪进卡片右上角），出流、不占高度，
+   所以 --map-h 不需要跟着改，窄屏也不会顶出地图上沿。 */
+.statwrap {
+  position: absolute; left: 16px; bottom: 16px;
+  z-index: var(--z-map-overlay);
+  display: flex; flex-direction: column; align-items: flex-start;
+  /* 容器自己不吃指针事件，否则它矩形范围内的空白会挡住地图拖拽/缩放 */
+  pointer-events: none;
+}
+.statcard {
+  pointer-events: auto;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 13px 16px 14px;
+  min-width: 148px;
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-3);
+}
+/* ⚠️ 这条不能省：[hidden] 的 UA 样式 `display:none` 特异性低于 `.statcard{display:flex}`，
+   不显式写一遍，hidden 属性会被 display:flex 反杀 —— 卡片将永远收不起来
+   （看不见但还在：仍然占位、仍然拦点击）。 */
+.statcard[hidden] { display: none; }
+.statcard__title {
+  font-size: var(--fs-md); font-weight: 600; color: var(--ink-2);
+  margin-bottom: 4px;
+}
+.statcard__row { display: flex; align-items: baseline; gap: 6px; }
+.statcard__num {
+  font-size: var(--fs-3xl); font-weight: 700; line-height: 1.12;
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.statcard__unit { font-size: var(--fs-sm); color: var(--ink-2); }
+.statcard .btn--pill { margin-top: 9px; align-self: flex-start; }
+
+/* 足迹概览的开合开关。
+   收起态：左下角一枚小胶囊「足迹概览」，右侧朝**上**的箭头。
+   展开态：绝对定位到卡片右上角、缩成 26px 圆钮，只留朝**下**的箭头 ——
+           卡片自己的标题就是「足迹概览」，按钮再带一遍文字纯属重名；
+           放进卡内还顺带不占高度。
+   ⚠️ 箭头方向是用户明确要求反过来的（2026-09-28）：收起向上、展开向下。
+      基础路径本身就是朝上的雪佛龙，展开态靠 rotate(180deg) 翻成朝下，
+      所以「改方向」= 改 index.html 里那条 path，不要动这里的 rotate。
+   .is-active：卡片收着但图例里有类型被筛掉时点亮。图例在卡片内部，
+   卡片一收起就看不到筛选状态了，不做这个提示会让人以为筛选失灵。 */
+.ovw-toggle {
+  pointer-events: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: var(--r-pill);
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: var(--sh-3);
+  font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.ovw-toggle:hover { color: var(--ink); }
+.ovw-toggle.is-active {
+  color: var(--primary-ink); background: var(--primary-soft); border-color: var(--primary);
+}
+.ovw-toggle[aria-expanded="true"] {
+  position: absolute; right: 8px; top: 8px;
+  width: 26px; height: 26px; padding: 0; gap: 0;
+  justify-content: center;
+  background: none; border-color: transparent; box-shadow: none;
+  /* ⚠️ 不能省：开关在 DOM 里排在卡片**之前**，展开后又被绝对定位到卡片右上角，
+     没有 z-index 就会被卡片里后绘制的 .statcard__title（<p> 是块级、宽度铺满内容区）
+     盖住 —— 表现是「箭头看得见但点不动」，Playwright 报
+     "statcard__title intercepts pointer events"。 */
+  z-index: 1;
+}
+.ovw-toggle[aria-expanded="true"] .ico,
+.ovw-toggle[aria-expanded="true"] .ovw-toggle__label { display: none; }
+.ovw-toggle[aria-expanded="true"]:hover {
+  background: rgba(255, 255, 255, .72); border-color: var(--line-2);
+}
+.ovw-toggle__chev {
+  width: 11px; height: 11px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 2.2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform var(--dur) var(--ease);
+}
+.ovw-toggle[aria-expanded="true"] .ovw-toggle__chev { transform: rotate(180deg); }
+
+/* 缩放控件 */
+.zoomctl {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  z-index: var(--z-map-overlay);
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-3);
+  overflow: hidden;
+}
+.zoomctl__btn {
+  width: 34px; height: 33px;
+  display: grid; place-items: center;
+  border: 0; background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.zoomctl__btn:hover { background: rgba(255, 255, 255, .72); color: var(--primary-ink); }
+.zoomctl__sep { width: 18px; height: 1px; background: var(--line-2); }
+
+/* ---------- 行程路线动画（js/route.js） ----------
+   2026-10-05 改版：「在地图上走一遍」从「足迹」页的**主地图**搬进了媒体弹窗，
+   跑在弹窗上半部那张小地图上（详见 js/route.js 的文件头）。
+   于是这一节只剩"地图上的图层与标记"；原来的回放条（.routebar / .rb-dot）、
+   主地图图钉压暗、以及「足迹概览」淡出避让那几段**全部删掉** ——
+   它们都挂在主地图的 `.mapcard__canvas.is-routing` 上，功能搬走后就是死代码。 */
+
+/* ---------- 站点打点 ----------
+   由 route.js 用 maplibregl.Marker 挂在地图上（HTML 元素，不是 symbol 图层 ——
+   画数字得依赖底图 glyphs 里有对应字体，不如自己画可控）。
+   ⚠️ 缩放/位移必须放在内层 .tm-stop__in：MapLibre 会把 transform 直接写在
+      marker 元素上（translate + 定位），写在外层会被它覆盖 —— 与图钉同一个坑，
+      见 js/markers.js 顶部那段注释。
+   2026-10-06 重画：整族统一成"白底盘 + 路线色内容"，比原先的实心橙圆轻得多，
+   也和去掉白底衬之后的细虚线是一套观感。打点可点（筛那一站的媒体）。 */
+.tm-stop { width: 18px; height: 18px; z-index: 7; cursor: pointer; }
+.tm-stop__in {
+  width: 100%; height: 100%;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid var(--route);
+  color: var(--route);
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+  box-shadow: 0 1px 4px rgba(var(--shadow-c), .24);
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease),
+              color var(--dur) var(--ease), opacity var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease);
+}
+/* 还没走到的站：**先不出现**（2026-10-06）。
+   旧版是"每一站都先淡着画上（opacity .55），再连线" —— 起点与终点的先后关系被抹平了，
+   看着像"先给目的地打好点，再补一条线"。现在的顺序是：
+   起点先打点 → 虚线出发 → 走到哪一站，那一站的打点才淡入出现。
+   ⚠️ 缩放写在内层：外层 transform 归 MapLibre 管（同 .tm-walker 那条约束）。
+   ⚠️ pending 的站必须 pointer-events:none —— 看不见却点得到会点出"筛选了一个还没到的站"。 */
+.tm-stop.is-pending { pointer-events: none; cursor: default; }
+.tm-stop.is-pending .tm-stop__in { opacity: 0; transform: scale(.4); }
+/* 已走到：路线色实心 + 一圈白描边（点亮 = 从"白底橙字"翻成"橙底白字"） */
+.tm-stop.is-done .tm-stop__in {
+  background: var(--route);
+  border-color: rgba(255, 255, 255, .92);
+  color: #FFFFFF;
+  box-shadow: 0 1px 5px rgba(var(--shadow-c), .3), 0 0 0 3px color-mix(in srgb, var(--route) 18%, transparent);
+}
+/* 当前站（正在走的这一段的前端）：再放大一点，与脚印光标呼应 */
+.tm-stop.is-cur .tm-stop__in { transform: scale(1.18); }
+/* 被点选（筛这一站的媒体）：再放大 + 一圈光晕 */
+.tm-stop.is-sel .tm-stop__in {
+  transform: scale(1.26);
+  box-shadow: 0 2px 9px rgba(var(--shadow-c), .34),
+              0 0 0 4px color-mix(in srgb, var(--route) 24%, transparent);
+}
+/* 其余站压灰（保序：不遮住"其余"两字本来的层次，用去色而不是换色） */
+.tm-stop.is-muted .tm-stop__in { filter: grayscale(1); opacity: .35; }
+.tm-stop:hover:not(.is-sel) .tm-stop__in { transform: scale(1.12); }
+
+/* ---------- 脚印光标 ----------
+   走在折线最前面的那一枚，用 sprite 里的 #i-foot。
+   ⚠️ 同一个坑：缩放写在 .tm-walker__in，外层 transform 归 MapLibre 管。
+   2026-10-06 重画：从"实心橙圆 + 白脚印"翻成"白底盘 + 橙脚印"，
+   与站点打点是同一族；收尾（finish）后整枚淡出，不再压在终点徽标上。 */
+.tm-walker { width: 22px; height: 22px; z-index: 8; pointer-events: none; transition: opacity .45s var(--ease); }
+.tm-walker.is-gone { opacity: 0; }
+.tm-walker__in {
+  width: 100%; height: 100%;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--route);
+  box-shadow: 0 2px 9px rgba(var(--shadow-c), .3), 0 0 0 4px color-mix(in srgb, var(--route) 18%, transparent);
+  animation: tm-walk 1.15s var(--ease) infinite;
+}
+.tm-walker__in svg { width: 13px; height: 13px; fill: currentColor; }
+/* 只声明 0/50/100 三个关键帧：走路节奏要"一轻一重"，匀速反而像机器 */
+@keyframes tm-walk {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-walker__in { animation: none; }
+  .tm-stop__in { transition: none; }
+}
+
+/* ---------- 窄屏：足迹时间线 ----------
+   一行放不下「日期 + 行程名 + 折叠箭头 + 右侧信息」时，让**信息另起一行**，
+   而不是把行程名挤成"京都…"这种省略号 —— 名称是这一行唯一有识别度的东西。 */
+@media (max-width: 620px) {
+  .tl__row { flex-wrap: wrap; row-gap: 4px; }
+  .tl__date { width: 72px; }
+  .tl__main { flex: 1 1 auto; }
+  .tl__info { width: 100%; margin-left: 0; padding-left: 30px; text-align: left; }
+  /* 组内缩进同步收窄，否则窄屏上两级缩进会把内容挤得太短 */
+  .tl__sub { margin-left: 6px; padding-left: 10px; }
+}
+
+/* ---------- 图例（按 types 分类筛选图钉显隐） ----------
+   原先是地图右下角的独立玻璃胶囊（absolute + backdrop-filter + --sh-3），
+   现并入「足迹概览」卡片内部，作为卡片底部的内嵌小面板：
+     · 不再定位、不再毛玻璃、不再投影 —— 它已经是卡片的一部分；
+     · 只保留三个类型；「已访问 / 未访问」说明已移除；
+     · 尺寸回到原设计（--fs-xs 字号 + --pin-w/--pin-h 图钉）；
+     · 常驻显示，不再单独收起 —— 卡片本身就是整块可收起的
+       （见上方 .statwrap / .ovw-toggle），没有理由在卡里再套一层开合。
+   ⚠️ .legend__item 必须写 `font: inherit`：<button> **不继承** 父级字号/字体，
+      不写的话它会退回 UA 默认的 13.33px Arial —— 中文会走 Arial 的兜底字形，
+      和旁边文字不同族、也不同大小，肉眼看得出"这几个字怪怪的"。 */
+.legend {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  align-self: stretch;
+  margin-top: 10px;
+  padding: 6px 9px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.legend__row { display: flex; align-items: center; gap: 9px; }
+.legend__item {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 3px;
+  border: 0; background: none; border-radius: var(--r-xs);
+  font: inherit;
+  color: inherit; cursor: pointer; white-space: nowrap;
+  transition: opacity var(--dur) var(--ease), color var(--dur-fast) var(--ease);
+}
+.legend__item:hover { color: var(--ink); }
+.legend__item.is-off { opacity: .34; text-decoration: line-through; }
+
+/* 图例标记 = **地图上那枚图钉**：SVG 由 js/markers.js 的 pinSvg() 生成，
+   尺寸也直接复用 --pin-w / --pin-h，所以图例里的钉子和地图上的钉子**一样大**。
+   （不要在这里给固定 px：改图钉尺寸时只动 PIN_DISPLAY + 这两个变量，图例自动跟随。）
+   原来这里是 8px 圆点，用白描边 + ring 与底色分离；换成图钉后改用极弱的
+   drop-shadow —— 钉子有形状和孔洞，不需要再靠描边勾边。 */
+.legend__pin {
+  width: var(--pin-w); height: var(--pin-h);
+  flex: 0 0 auto;
+  filter: drop-shadow(0 .5px 1px var(--pin-shadow));
+}
+.legend__pin svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* 瓦片异常低调提示 */
+.mapcard__status {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  z-index: var(--z-map-overlay);
+  padding: 5px 12px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  background: var(--glass-strong);
+  border-radius: var(--r-pill);
+  box-shadow: var(--sh-2);
+}
+
+/* =========================================================
+   地图图钉（替换 Ref_Globe 的呼吸圆点）
+   ---------------------------------------------------------
+   几何为 UI_Ref.jpeg 逐像素实测值（圆头 r=7 / 切线段尾部 / 孔洞 r=2.9）；
+   实测外框 14×20，按用户要求累计缩小 37% 渲染 → 8.82×12.6（--pin-w / --pin-h）。
+   配色**按 types 类型分色**：主体色来自每个钉子自己写上的 --pin-body
+   （见 js/markers.js createPinElement），CSS 只引用变量、不写死颜色。
+   SVG 用 viewBox 等比缩放，所以几何定义不用跟着改。
+   外层 .tm-pin 由 MapLibre 接管：它会把 transform 直接写成
+   translate(-50%,-100%) 来定位，所以尺寸/缩放/位移一律放在内层
+   .tm-pin__inner，写在外层会被 MapLibre 覆盖掉。
+   --pin-scale 由 JS 按 zoom 写入地图容器，内层通过继承读取。
+   ========================================================= */
+.tm-pin {
+  width: var(--pin-w); height: var(--pin-h);
+  cursor: pointer;
+}
+.tm-pin__inner {
+  position: absolute; inset: 0;
+  transform-origin: 50% 100%;         /* 尖端为原点，缩放时落点不跑 */
+  transform: scale(var(--pin-scale, 1));
+  transition: transform var(--dur-fast) var(--ease);
+  filter: drop-shadow(0 .5px 1px var(--pin-shadow));
+  will-change: transform;
+}
+.tm-pin svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.tm-pin__body { fill: var(--pin-body); transition: fill var(--dur-fast) var(--ease); }
+.tm-pin__hole { fill: #FFFFFF; }
+
+.tm-pin:hover .tm-pin__inner {
+  transform: translateY(-1.5px) scale(calc(var(--pin-scale, 1) * 1.18));
+}
+.tm-pin:hover .tm-pin__body { fill: var(--pin-body-lift); }
+.tm-pin.is-active .tm-pin__inner {
+  transform: translateY(-2.5px) scale(calc(var(--pin-scale, 1) * 1.3));
+}
+.tm-pin:hover, .tm-pin.is-active { z-index: 5; }
+
+/* 命中区：图钉本体只有 8.8px 宽，用伪元素扩到约 31×31 的透明热区，
+   鼠标/触控都好对准（这是命中性问题，别为了"看着小"一起缩小） */
+.tm-pin::after {
+  content: ''; position: absolute; inset: -11px -11px -7px -11px;
+}
+
+/* 图钉落点光晕：与主体同色（--pin-accent 由 JS 写成该点的类型色）。
+   宽高用百分比，跟着 --pin-w/--pin-h 一起缩放，改尺寸时不用再动这里。 */
+.tm-pin__halo {
+  position: absolute; left: 50%; bottom: -2px;
+  width: 86%; height: 3.6px;
+  transform: translateX(-50%) scale(.6);
+  border-radius: 50%;
+  background: var(--pin-accent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  filter: blur(3px);
+}
+.tm-pin:hover .tm-pin__halo,
+.tm-pin.is-active .tm-pin__halo { opacity: .34; transform: translateX(-50%) scale(1.6); }
+
+/* MapLibre 悬浮提示 */
+.maplibregl-popup-content {
+  padding: 7px 11px !important;
+  border-radius: var(--r-sm) !important;
+  background: var(--glass-strong) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--sh-3) !important;
+  color: var(--ink) !important;
+  font-family: var(--font-sans);
+}
+.maplibregl-popup-tip { display: none !important; }
+.tm-tip b { font-weight: 600; }
+.tm-tip i { font-style: normal; font-size: var(--fs-xs); color: var(--ink-2); margin-left: 6px; }
+.tm-tip__date { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 600; color: var(--primary-ink); }
+
+/* =========================================================
+   媒体网格 / 卡片
+   ========================================================= */
+.mediagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 11px; }
+
+.mcard {
+  display: flex; flex-direction: column;
+  border: 0; padding: 0; background: none;
+  text-align: left; cursor: pointer;
+  border-radius: var(--r-md);
+  transition: transform var(--dur) var(--ease);
+}
+.mcard:hover { transform: translateY(-2px); }
+
+.mcard__media {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-3);
+  box-shadow: var(--sh-1);
+}
+.mcard__media img,
+.mcard__media video { width: 100%; height: 100%; object-fit: cover; }
+.mcard__media img { transition: transform var(--dur-slow) var(--ease-out); }
+.mcard:hover .mcard__media img { transform: scale(1.06); }
+
+.mcard__badge {
+  position: absolute; left: 7px; top: 7px;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(20, 24, 30, .5);
+  backdrop-filter: blur(6px);
+  color: #fff; font-size: var(--fs-xs);
+}
+.mcard__meta { padding: 7px 2px 2px; }
+.mcard__name { font-size: var(--fs-md); font-weight: 600; }
+.mcard__sub {
+  display: flex; align-items: center; gap: 4px;
+  font-size: var(--fs-xs); color: var(--ink-3); margin-top: 1px;
+}
+.mcard--text .mcard__media {
+  display: flex; align-items: flex-start;
+  padding: 12px;
+  background: linear-gradient(160deg, #FCF7EE, #F3EADB);
+}
+.mcard__note {
+  font-size: var(--fs-sm); color: var(--ink-2); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* 虚线"添加"瓦片 */
+.mcard--add .mcard__media {
+  border: 1.5px dashed var(--line-2);
+  background: transparent; box-shadow: none;
+  display: grid; place-items: center; gap: 4px;
+  color: var(--ink-3);
+}
+.mcard--add .mcard__media:hover { border-color: var(--primary); color: var(--primary-ink); background: var(--primary-tint); }
+.mcard--add .mcard__plus { font-size: 22px; line-height: 1; }
+.mcard--add .mcard__hint { font-size: var(--fs-sm); font-weight: 600; }
+.mcard--add .mcard__hint2 { font-size: var(--fs-xs); }
+
+/* 横向条带（我的记录 / 愿望清单） */
+.strip {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(118px, 1fr);
+  gap: 11px; overflow-x: auto; padding-bottom: 4px;
+}
+.strip .mcard { min-width: 0; }
+
+/* 时间线条目 —— 现在只服务「足迹」一页（年份 → 行程 → 地点 两级） */
+.tl { display: flex; flex-direction: column; gap: 18px; }
+.tl__year {
+  font-size: var(--fs-lg); font-weight: 700;
+  display: flex; align-items: center; gap: 10px; color: var(--ink);
+}
+.tl__year::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--line); }
+.tl__list { display: flex; flex-direction: column; gap: 2px; margin-left: 4px; }
+/* 一行 —— **是 div，不是 button**。
+   分组行要在标题后面放折叠箭头，箭头必须是真的 button（要能 Tab、要能带
+   aria-expanded），而按钮不能嵌套按钮。所以整行改成一个静态容器，
+   另加一层绝对定位的透明按钮（.tl__hit）兜住"点哪都能打开"。
+   见 js/ui.js 的 buildRow()。 */
+.tl__row {
+  position: relative;                     /* .tl__hit 的定位基准 */
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-fast) var(--ease);
+}
+.tl__row:hover { background: var(--bg-warm); }
+.tl__hit {
+  position: absolute; inset: 0; z-index: 1;
+  border: 0; padding: 0; background: none;
+  border-radius: inherit; cursor: pointer;
+}
+/* 焦点环画在覆盖层上 = 画在整行上（覆盖层没有可见内容，默认看不到焦点） */
+.tl__hit:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.tl__date { font-size: var(--fs-sm); color: var(--ink-3); font-variant-numeric: tabular-nums; width: 84px; flex: 0 0 auto; }
+/* 名称 + 这条记录自己的一句话（places.json 的 desc）。
+   ⚠️ 两行都靠 min-width:0 + ellipsis 收敛，不能让长文本把右侧的 .tl__info 挤出去；
+      flex 容器里的文本要能省略，祖先链上每一层都得允许收缩（这里就是 .tl__main）。 */
+.tl__main { display: flex; flex-direction: column; flex: 0 1 auto; min-width: 0; }
+.tl__name { font-size: var(--fs-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl__desc { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl__info {
+  font-size: var(--fs-sm); color: var(--ink-2); margin-left: auto; text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 类型标签（旅行 / 居住 / 目的地）。颜色由 JS 内联成**地图图例那一档**
+   （places.json 的 types 表），所以这里只负责字重 —— 别在 CSS 里写死颜色，
+   否则图例和时间线会各自一套色。 */
+.tl__type { font-weight: 600; }
+
+/* 折叠箭头。⚠️ z-index 必须高于 .tl__hit，否则被透明层挡住、点不动。
+   ⚠️ padding 必须清零：按钮的 UA 默认 padding 是 `1px 6px`，在 22px 的圆上
+      内容盒只剩 10×20，图标虽然被 grid 居中，但整体相对圆心是歪的（视觉上偏上）。
+      line-height:0 顺手掐掉行盒基线的影响。 */
+.tl__fold {
+  position: relative; z-index: 2;
+  flex: 0 0 auto;
+  width: 22px; height: 22px; margin-left: -5px;
+  padding: 0; line-height: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: none;
+  color: var(--ink-3); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.tl__fold:hover { background: var(--primary-soft); color: var(--primary-ink); }
+.tl__fold .ico { display: block; transition: transform var(--dur) var(--ease); }
+.tl__fold[aria-expanded="true"] { color: var(--primary-ink); }
+.tl__fold[aria-expanded="true"] .ico { transform: rotate(180deg); }
+
+/* ---------- 行程分组（折叠头 + 组内地点行） ----------
+   只在行程覆盖 ≥2 个地点时出现（单地点行程退化成一行普通足迹，
+   见 js/ui.js 的 tripGroupRow）。组内缩进 + 一条竖向导引线，
+   让人一眼看出"这几行归上面那一行管"，不需要额外写说明。 */
+.tlgrp { display: flex; flex-direction: column; gap: 2px; }
+.tl__sub {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-left: 13px; padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+/* ⚠️ 这一条不能省：本类写了 display:flex，**特异性高于** [hidden] 的 UA 样式
+   `display:none`，不显式补一遍的话 `sub.hidden = true` 会**静默失效** ——
+   分组永远是展开的（同 .statcard[hidden] 的坑）。 */
+.tl__sub[hidden] { display: none; }
+
+
+/* =========================================================
+   统计视图（实体在 js/stats.js，全部手写 SVG / HTML）
+   ---------------------------------------------------------
+   ⚠️ 入场动画一律用 **@keyframes + backwards 填充**，不用「初始态 + .is-in 终态」：
+      后者的失效模式是灾难性的 —— 只要那段加类名的 JS 没跑到，
+      卡片会永远停在 opacity:0 / 高度 0（整页空白，且控制台不一定报错）。
+      keyframes 是元素插入文档即播放，静态值就是**正确终态**，
+      最坏情况只是"不animate"，不会消失。
+      （tokens.css 里 `* { animation-duration: .01ms !important }` 已统一接管
+        prefers-reduced-motion，这里不必再写一遍；只额外清掉 delay。）
+
+   ⚠️ 百分比高度（--h）要求祖先有**确定高度**：
+      .years__plot 写死 height，.ybar 靠 flex 拉伸撑满，
+      .ybar__stack / .ybar__cap 的 --h 才解析得出来。别把那个 height 删了。
+   ========================================================= */
+
+/* 共享 tooltip（js/stats.js 里绝对定位到 root 内），需要一个定位基准 */
+#tm-view-stats { position: relative; }
+
+/* ---------- 顶部 KPI 条 ---------- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(188px, 1fr)); gap: 12px; }
+.kpi {
+  display: flex; align-items: center; gap: 11px;
+  padding: 13px 15px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.kpi:hover { transform: translateY(-2px); box-shadow: var(--sh-2); }
+/* display:grid + place-items 让 .ico 居中；顺带保证 .ico 是 grid item（不是 inline），
+   否则 SVG 的 width/height 会被行内盒模型吃掉。 */
+.kpi__ico {
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: 11px;
+  background: var(--primary-soft); color: var(--primary-ink);
+}
+.kpi__txt { display: flex; flex-direction: column; min-width: 0; }
+.kpi__num { font-size: var(--fs-2xl); font-weight: 700; line-height: 1.06; font-variant-numeric: tabular-nums; }
+.kpi__label { font-size: var(--fs-sm); color: var(--ink-2); }
+.kpi__sub { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ---------- 面板骨架 ----------
+   用 grid-template-areas 而不是 span 拼凑：7 个面板在 2/3/4 列下都要**正好铺满**，
+   靠 span 组合会在某个断点留下空洞（且 grid-auto-flow:dense 会打乱视觉顺序）。
+   代价是窄断点下视觉顺序与 DOM 顺序不一致（焦点顺序按 DOM 走），
+   这是刻意的取舍：宁可焦点顺序稳定，也不要留洞。 */
+.panels {
+  display: grid; gap: var(--gap);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "explore explore"
+    "type    media"
+    "years   years"
+    "country season"
+    "mile    mile";
+}
+.panel {
+  display: flex; flex-direction: column; min-width: 0;
+  padding: var(--pad-card);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+  animation: tm-rise var(--dur-slow) var(--ease-out) backwards;
+}
+@keyframes tm-rise { from { opacity: 0; transform: translateY(12px); } }
+/* 错落入场（纯装饰，最长 250ms） */
+.panel:nth-child(2) { animation-delay: 50ms; }
+.panel:nth-child(3) { animation-delay: 100ms; }
+.panel:nth-child(4) { animation-delay: 150ms; }
+.panel:nth-child(5) { animation-delay: 200ms; }
+.panel:nth-child(n+6) { animation-delay: 250ms; }
+
+.panel--explore { grid-area: explore; }
+.panel--type { grid-area: type; }
+.panel--years { grid-area: years; }
+.panel--media { grid-area: media; }
+.panel--country { grid-area: country; }
+.panel--season { grid-area: season; }
+.panel--mile { grid-area: mile; }
+
+.panel__head { margin-bottom: 12px; }
+.panel__title { font-size: var(--fs-lg); font-weight: 700; }
+.panel__sub { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 2px; }
+.panel__body { flex: 1 1 auto; min-width: 0; }
+.panel__note { margin-top: 10px; font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ---------- 世界探索度（环形进度 + 三条事实） ---------- */
+.explore { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.ring { position: relative; width: 132px; height: 132px; flex: 0 0 auto; }
+.ring__svg { display: block; width: 100%; height: 100%; }
+.ring__track { fill: none; stroke: var(--surface-3); stroke-width: 12; }
+.ring__stop-a { stop-color: var(--primary); }
+.ring__stop-b { stop-color: var(--primary-dark); }
+/* 环形进度：dasharray = 整圈周长（JS 算好写进属性），
+   dashoffset 由 keyframes 从「满周长（空环）」扫到目标值。
+   起止值都从内联的 --ring-c / --ring-off 取，不在 CSS 里重算几何。
+
+   ⚠️ 这里**必须**写一行静态的 `stroke-dashoffset: var(--ring-off)`：
+      keyframes 是 backwards 填充，动画结束后就交还给静态值；
+      若静态值缺省（= 0），动画扫到位后会**一下弹回满环**。
+      凡是「只为动画声明、没有静态落点」的属性都有这个坑。 */
+.ring__fill {
+  fill: none; stroke: url(#tm-ring-grad); stroke-width: 12;
+  stroke-dashoffset: var(--ring-off, 0);
+  animation: tm-ring-in 1.05s var(--ease-out) 120ms backwards;
+}
+@keyframes tm-ring-in {
+  from { stroke-dashoffset: var(--ring-c, 0); }
+  to { stroke-dashoffset: var(--ring-off, 0); }
+}
+/* pointer-events:none：圆心只是个读数，别挡住底下的环形 */
+.ring__center {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring__val { display: flex; align-items: baseline; }
+.ring__num { font-size: var(--fs-3xl); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.ring__unit { font-size: var(--fs-sm); color: var(--ink-2); }
+.ring__cap { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 3px; }
+
+.explore__side { flex: 1 1 240px; min-width: 0; }
+.explore__lead { font-size: var(--fs-md); color: var(--ink-2); line-height: 1.75; }
+.explore__lead b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.explore__facts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.explore__facts li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+}
+.explore__ico {
+  width: 26px; height: 26px; flex: 0 0 auto;
+  display: grid; place-items: center;                 /* 同上：保证 .ico 有确定的盒 */
+  border-radius: 8px;
+  background: var(--surface-3); color: var(--primary-ink);
+}
+.explore__txt { display: flex; flex-direction: column; min-width: 0; }
+.explore__txt b { font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.explore__txt span { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ---------- 足迹构成（环形图 + 可点图例） ---------- */
+.typebox { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.typebox__ring { position: relative; width: 118px; height: 118px; flex: 0 0 auto; }
+.donut { display: block; width: 100%; height: 100%; }
+.donut__track { fill: none; stroke: var(--surface-3); stroke-width: 15; }
+/* 扇区靠 stroke-dasharray / dashoffset 画（不是 path）：几何全在 JS 里算，
+   这里只声明描边宽度和"变暗"的过渡。
+   ⚠️ fill:none 不能省：SVG <circle> 默认填充黑色，漏了就是一块黑饼。 */
+.donut__seg {
+  fill: none; stroke-width: 15; cursor: pointer;
+  transition: opacity var(--dur) var(--ease);
+}
+.donut__seg.is-dim { opacity: .2; }
+.typebox__center {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.typebox__num { font-size: var(--fs-xl); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.typebox__cap { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 2px; }
+
+.typebox__legend { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.typekey {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 8px;
+  padding: 5px 7px;
+  border: 0; background: none; border-radius: var(--r-xs);
+  text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
+}
+.typekey:hover, .typekey.is-active { background: var(--primary-tint); }
+.typekey.is-dim { opacity: .38; }
+/* 图例标记 = 地图上那枚图钉，尺寸直接复用 tokens.css 的 --pin-w / --pin-h */
+.typekey__pin { width: var(--pin-w); height: var(--pin-h); display: block; }
+.typekey__pin svg { display: block; width: 100%; height: 100%; }
+.typekey__name {
+  font-size: var(--fs-md); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.typekey__val { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* ---------- 足迹年轮（堆叠柱状图） ---------- */
+.years { padding-top: 18px; }        /* 给最高柱子的数值标签留出向上溢出的空间 */
+.years__plot { position: relative; height: 138px; }
+.years__grid {
+  position: absolute; inset: 0;
+  background-image: repeating-linear-gradient(
+    to top, var(--line-soft) 0 1px, transparent 1px 25%);
+  border-bottom: 1px solid var(--line);
+}
+.years__avg { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--primary); }
+.years__avg span {
+  position: absolute; right: 0; top: -15px;
+  padding: 0 4px; border-radius: var(--r-xs);
+  background: var(--surface);
+  font-size: 10px; color: var(--primary-ink); font-variant-numeric: tabular-nums;
+}
+/* 必须在 .years__grid / .years__avg 之后：同 z-index 下后者先画 */
+.years__bars { position: absolute; inset: 0; display: flex; align-items: stretch; gap: 6px; }
+
+.ybar {
+  position: relative; flex: 1 1 0; min-width: 0;
+  padding: 0; border: 0; background: none; cursor: pointer;
+}
+/* 入场：从底部长起来。静态值是 transform:none（= 完整高度），
+   keyframes 只声明 from —— to 用元素自身的计算值，所以动画结束不会回跳。 */
+.ybar__stack {
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--h, 0%);
+  display: flex; flex-direction: column-reverse;      /* DOM 第一个 = 柱子最底下一段 */
+  border-radius: var(--r-xs) var(--r-xs) 0 0; overflow: hidden;
+  transform-origin: 50% 100%;
+  animation: tm-grow-y .72s var(--ease-out) var(--d, 0ms) backwards;
+}
+@keyframes tm-grow-y { from { transform: scaleY(.02); } }
+.ybar__seg { display: block; width: 100%; }
+/* 段与段之间的白色发丝线。不用 margin：那会让各段高度之和超过 100%。 */
+.ybar__seg + .ybar__seg { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6); }
+.ybar:hover .ybar__stack { filter: brightness(1.06); }
+/* 数值标签放在 .ybar__stack **外面**：stack 有 overflow:hidden，放里面会被裁掉 */
+.ybar__cap {
+  position: absolute; left: 50%; bottom: var(--h, 0%);
+  transform: translateX(-50%); margin-bottom: 4px;
+  font-size: 10px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity var(--dur) var(--ease);
+}
+.ybar:hover .ybar__cap, .ybar.is-active .ybar__cap { opacity: 1; }
+.ybar.is-active::after {
+  content: ""; position: absolute; left: 1px; right: 1px; bottom: -5px; height: 2px;
+  border-radius: 2px; background: var(--primary);
+}
+.years.has-selection .ybar:not(.is-active) .ybar__stack { opacity: .42; }
+.years .ybar__stack { transition: opacity var(--dur) var(--ease); }
+
+.years__labels { display: flex; gap: 6px; margin-top: 6px; }
+.years__x {
+  flex: 1 1 0; min-width: 0; text-align: center;
+  font-size: 10px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.years__detail { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-2); min-height: 54px; }
+.years__hint { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--ink-3); }
+.years__hint .ico { color: var(--primary-ink); }
+.years__detailhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; }
+.years__detailhead b { font-size: var(--fs-base); }
+.years__detailhead span { font-size: var(--fs-xs); color: var(--ink-3); }
+.years__cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.ycard {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px 5px 9px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-pill);
+  font-size: var(--fs-sm); cursor: pointer; text-align: left;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+.ycard:hover { border-color: var(--primary); background: var(--primary-tint); transform: translateY(-1px); }
+/* 父级是 inline-flex，圆点才有宽高（display:inline 的 span 不接受 width/height） */
+.ycard__dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
+.ycard__name { font-weight: 600; }
+.ycard__meta { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ---------- 媒体构成（100% 堆叠条） ---------- */
+/* 媒体条与季节格都是"扁"内容，面板被同行更高的面板撑高后会顶在上沿显得空，
+   所以把这两个 body 变成 flex 纵向居中，让内容落在面板视觉中心。 */
+.panel--media .panel__body,
+.panel--season .panel__body { display: flex; flex-direction: column; justify-content: center; }
+.mediabar {
+  display: flex; height: 24px;
+  background: var(--surface-3);
+  border-radius: var(--r-pill); overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+/* 静态宽度就是正确终态；keyframes 只声明 from:0 —— 动画没跑也不会塌成 0 */
+.mediabar__seg {
+  display: block; width: var(--w, 0%); height: 100%;
+  animation: tm-wipe-x .8s var(--ease-out) 120ms backwards;
+}
+@keyframes tm-wipe-x { from { width: 0; } }
+.mediakeys { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.mediakey {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center; gap: 9px;
+  padding: 4px 6px; border-radius: var(--r-xs);
+  font-size: var(--fs-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.mediakey:hover { background: var(--bg-warm); }
+.mediakey__dot { width: 9px; height: 9px; border-radius: 50%; }
+.mediakey__val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mediakey__pct { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
+
+/* ---------- 国家 / 地区排行 ---------- */
+.crank { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.crank__row { min-width: 0; }
+.crank__btn {
+  display: grid; grid-template-columns: minmax(0, 66px) minmax(0, 1fr) auto;
+  align-items: center; gap: 10px;
+  width: 100%; padding: 6px 8px;
+  border: 0; background: none; border-radius: var(--r-sm);
+  text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.crank__btn:hover { background: var(--primary-tint); }
+.crank__name { font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crank__track { display: block; height: 9px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.crank__fill {
+  display: block; height: 100%; width: var(--w, 0%); border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary-soft), var(--primary));
+  animation: tm-wipe-x .8s var(--ease-out) 180ms backwards;
+}
+.crank__val { font-size: var(--fs-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 16px; text-align: right; }
+
+/* ---------- 出发的季节（12 个月热力格） ----------
+   ⚠️ .season 与 .season__axis 的列数、gap 必须完全一致，否则刻度与格子会错位。
+   格子用 aspect-ratio 定高（宽由轨道决定），故意做成"略高于宽"，
+   这样在 4 列窄轨道下（约 21px 宽）也能塞下两位数月份次数。 */
+.season { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; }
+.season__cell {
+  position: relative; aspect-ratio: 4 / 5; border-radius: 7px;
+  display: grid; place-items: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.season__cell:hover { transform: translateY(-3px); }
+.season__n { font-size: 10px; line-height: 1; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.season__cell.is-empty .season__n { display: none; }
+.season__cell.is-strong .season__n { color: #fff; font-weight: 700; }
+.season__axis { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
+.season__axis span { text-align: center; font-size: 10px; color: var(--ink-3); }
+
+/* ---------- 里程碑 ---------- */
+.milestone { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
+.milestone__item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 9px; align-items: center;
+  padding: 11px 13px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-md);
+  transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.milestone__item:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.milestone__ico {
+  grid-row: 1 / span 3;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  background: var(--primary-soft); color: var(--primary-ink);
+}
+.milestone__k { font-size: var(--fs-xs); color: var(--ink-3); }
+.milestone__v { font-size: var(--fs-base); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.milestone__sub { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ---------- 共享 tooltip ----------
+   位置靠 --tx / --ty（transform），不改 left/top：避免每次移动都触发一次布局。 */
+.stattip {
+  position: absolute; left: 0; top: 0; z-index: 20;
+  max-width: 264px; padding: 9px 11px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--sh-3);
+  font-size: var(--fs-sm); line-height: 1.6;
+  pointer-events: none;
+  transform: translate3d(var(--tx, 0), var(--ty, 0), 0);
+}
+.stattip b { display: block; font-size: var(--fs-base); margin-bottom: 1px; }
+.stattip > span { display: block; font-size: var(--fs-xs); color: var(--ink-2); margin-bottom: 5px; }
+.stattip__list { list-style: none; margin: 0; padding: 0; }
+.stattip__list li {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: var(--fs-xs); color: var(--ink-2);
+}
+.stattip__list li span { color: var(--ink-3); flex: 0 0 auto; }
+/* 特异性要压过 .stattip__list li，否则会继续 space-between */
+.stattip__list li.stattip__more { justify-content: flex-start; color: var(--ink-3); }
+
+/* ---------- 统计页响应式（4 列 / 3 列 / 单列） ---------- */
+@media (min-width: 880px) {
+  .panels {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "explore explore type"
+      "years   years   years"
+      "media   country season"
+      "mile    mile    mile";
+  }
+}
+@media (min-width: 1280px) {
+  .panels {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas:
+      "explore explore type    media"
+      "years   years   years   years"
+      "country season  mile    mile";
+  }
+}
+@media (max-width: 560px) {
+  .panels {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "explore" "type" "media" "years" "country" "season" "mile";
+  }
+}
+
+/* 上面这些图表的动画时长是写死的（不受 --dur-* 影响），
+   所以要在 tokens.css 的全局降级之外，再把 delay 一起清掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .panel, .ring__fill, .ybar__stack, .mediabar__seg, .crank__fill {
+    animation-duration: .01ms !important;
+    animation-delay: 0ms !important;
+  }
+}
+
+/* 区块标题 */
+.sect { margin: 4px 0 12px; }
+.sect__title { font-size: var(--fs-lg); font-weight: 700; }
+.sect__sub { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 2px; }
+.sect + .sect { margin-top: 22px; }
+
+/* 空状态 */
+.empty {
+  padding: 32px 16px; text-align: center; color: var(--ink-3); font-size: var(--fs-md);
+}
+.empty__big { font-size: 26px; margin-bottom: 6px; }
+
+/* =========================================================
+   启动 / 错误遮罩
+   ========================================================= */
+.boot {
+  position: fixed; inset: 0; z-index: var(--z-boot);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: var(--bg);
+  padding: 24px;
+  text-align: center;
+  transition: opacity var(--dur-slow) var(--ease), visibility var(--dur-slow);
+}
+.boot.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+.boot__spinner {
+  width: 30px; height: 30px;
+  border: 3px solid var(--line-2);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: tm-spin 1s linear infinite;
+}
+@keyframes tm-spin { to { transform: rotate(360deg); } }
+.boot__emoji { font-size: 40px; }
+.boot__text { font-size: var(--fs-lg); font-weight: 600; }
+.boot__hint { font-size: var(--fs-md); color: var(--ink-2); line-height: 1.9; max-width: 520px; }
+.boot code {
+  background: var(--surface-3); padding: 2px 7px; border-radius: var(--r-xs);
+  font-size: var(--fs-sm);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 12px);
+  z-index: var(--z-boot);
+  padding: 9px 16px;
+  background: var(--ink); color: #fff;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-md);
+  box-shadow: var(--sh-4);
+  opacity: 0; visibility: hidden;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease), visibility var(--dur);
+}
+.toast.is-on { opacity: 1; visibility: visible; transform: translate(-50%, 0); }

@@ -1,0 +1,153 @@
+/* =========================================================
+   tokens.css · 设计令牌
+   ---------------------------------------------------------
+   色值全部取自 UI_Ref.jpeg 的实际像素采样（PIL 取样，见 docs/05-design-tokens.md）。
+   修改视觉请优先改这里，不要在组件里写死颜色。
+   ========================================================= */
+
+:root {
+  /* ---------- 背景 / 表面 ---------- */
+  --bg:            #FBF6F0;   /* 页面与侧栏底色（米白） */
+  --bg-warm:       #F7F1E8;   /* 次级底色 / hover */
+  --surface:       #FFFFFF;   /* 卡片纯白 */
+  --surface-2:     #FCF9F2;   /* 卡片内嵌区（如弹窗头部、详情面板） */
+  --surface-3:     #F4EEE4;   /* 更浅的分区底色 */
+  --glass:         rgba(255, 255, 255, .78);   /* 毛玻璃（统计卡、图例） */
+  --glass-strong:  rgba(255, 255, 255, .92);
+
+  /* ---------- 文字 ---------- */
+  --ink:           #2F2B26;   /* 主文字（暖黑） */
+  --ink-2:         #6B655C;   /* 次级文字 */
+  --ink-3:         #9A9287;   /* 弱化文字 / 占位符 */
+  --on-primary:    #FFFFFF;
+
+  /* ---------- 线条 ---------- */
+  --line:          #EDE5D9;   /* 常规分隔线 */
+  --line-2:        #E2D8C8;   /* 略深的分隔线 / 描边 */
+  --line-soft:     #F3ECE1;
+
+  /* ---------- 主色（效果图 顶部「记录新足迹」按钮实测 #7C9CC3） ---------- */
+  --primary:       #7C9CC3;
+  --primary-dark:  #6788B0;
+  --primary-soft:  #DDE5F0;   /* 侧栏选中态底色（实测 #DDE5F0） */
+  --primary-ink:   #4E6E96;   /* 选中态文字 / 强调文字 */
+  --primary-tint:  #EEF3F9;
+
+  /* ---------- 地图配色（效果图地图区实测） ---------- */
+  --map-ocean:     #DEE9EB;   /* 海洋 */
+  --map-land:      #F2E6D6;   /* 未访问国家底色 */
+  --map-border:    #BDB3A6;   /* 内部国界：陆地压暗一档的同色相米色线（**不是白线**） */
+  --map-line:      #E6DACA;   /* 内部行政区细线 */
+  --map-label:     #8B8578;   /* 国家名标注 */
+  /* 海岸线描边：从效果图里"抠"出描边像素反解出来的值（画面实测 (187,188,183)）。
+     为什么不是直接抄实测色 #BBBCB7 —— fill-outline-color 只有 1 设备像素宽，
+     采样到的是抗锯齿混色，比配置值亮约 6 级。详见 docs/03 的「海岸线描边」。 */
+  --map-coast:     #B5B6B1;
+  /* 行程路线（js/route.js 画在**弹窗小地图**上的时间折线 + 站点打点）。
+     取 types 里「旅行」的色值 —— 行程本来就是旅行，同色让折线与图钉语义呼应。
+     ⚠️ JS 侧副本在 js/config.js 的 COLORS.route，改一处要改两处。
+     （曾经还有一条白底衬，2026-10-06 按用户要求删了 —— 白底衬把虚线衬成
+       一串"糖果点"；线直接画在地面上的观感更干净。） */
+  --route:         #C86E4A;
+
+  /* ---------- 图钉 ----------
+     几何：外框 14×20、头部正圆 r=7、孔洞 r=2.9（对 UI_Ref.jpeg 逐像素实测，不随类型变）。
+     配色：**主体色 = 该点的 types 类型色**（居住 #4E7398 / 旅行 #C86E4A / 目的地 #7E6C9C）。
+     三个变量由 JS 逐钉写入（类型是数据驱动的，CSS 里写不全）：
+       --pin-body       主体填充色
+       --pin-body-lift  hover 提亮色，由类型色经 utils.mixHex() 派生
+       --pin-accent     落点光晕色，与主体同色
+     下面三个值是**兜底**：类型色缺失（数据里没有该类型）或变量未写入时才会用到。
+     ⚠️ 历史上曾按效果图"主体统一藏青 #304A6A、类型色只作光晕"，已被用户新要求推翻，
+        不要照旧文档改回去。 */
+  --pin-body:      #304A6A;   /* 兜底主体色 */
+  --pin-body-lift: #37527A;   /* 兜底 hover 提亮 */
+  --pin-accent:    #304A6A;   /* 兜底光晕色 */
+  --pin-halo:      rgba(48, 74, 106, .28);
+  --pin-shadow:    rgba(28, 46, 70, .40);
+
+  /* 渲染尺寸 = 效果图实测 14×20 × PIN_DISPLAY(0.63) = 8.82×12.6
+     （用户先后要求缩小 30%、再缩小 10% → 0.7 × 0.9 = 0.63）。
+     ⚠️ 这两个值必须与 js/markers.js 的 PIN.w / PIN.h 保持一致（那边用于 Popup 偏移）。 */
+  --pin-w:         8.82px;
+  --pin-h:         12.6px;
+
+  /* ---------- 已访问国家调色板 ----------
+     5~6 种温暖低饱和大地色，取自效果图各国地块：
+     珊瑚赤陶 / 灰蓝 / 淡天蓝 / 芥末沙 / 灰绿 / 灰玫
+     低饱和度、明度接近，保证"够区分又不杂乱"。 */
+  --c1: #E0A183;   /* 珊瑚赤陶  China / France / Spain */
+  --c2: #AEC5D9;   /* 淡天蓝    USA / Germany */
+  --c3: #93A7BC;   /* 灰蓝      UK / Sweden */
+  --c4: #E3C98F;   /* 芥末沙    Norway */
+  --c5: #B9C6A6;   /* 灰绿      Italy / Australia */
+  --c6: #D9AFA4;   /* 灰玫      Denmark */
+
+  /* ---------- 语义色 ---------- */
+  --danger:        #C9705C;
+  --shadow-c:      46 42 36;
+
+  /* ---------- 圆角 ---------- */
+  --r-xs: 8px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ---------- 阴影（非常克制，仅用来分层） ---------- */
+  --sh-1: 0 1px 2px rgba(var(--shadow-c), .04), 0 1px 1px rgba(var(--shadow-c), .03);
+  --sh-2: 0 2px 8px rgba(var(--shadow-c), .05), 0 1px 2px rgba(var(--shadow-c), .04);
+  --sh-3: 0 8px 24px rgba(var(--shadow-c), .07), 0 2px 6px rgba(var(--shadow-c), .04);
+  --sh-4: 0 20px 56px rgba(var(--shadow-c), .16), 0 4px 12px rgba(var(--shadow-c), .08);
+
+  /* ---------- 字体 ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+               "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* 手写体：只用系统自带字体，避免离线时字体请求失败污染控制台 */
+  --font-script: "Snell Roundhand", "Bradley Hand", "Noteworthy", "Marker Felt",
+                 "Segoe Script", "Brush Script MT", cursive;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fs-3xl: 28px;
+
+  /* ---------- 尺寸 ---------- */
+  --sidebar-w: 208px;
+  --gap: 16px;
+  --pad-card: 16px;
+  /* 地图卡片高度 = 默认视角能露多少世界的**唯一**杠杆。
+     mercator 下世界是个正方形，默认视角又是"世界铺满"（相机被夹死），
+     于是纵向能露多少纬度完全由「卡片高 / 卡片宽」决定：
+        高/宽 ≈ 0.25 → 只露 ±40° 左右（看不出"整个世界"）
+        高/宽 ≈ 0.45 → 约 −54°~68°（除南极与极北，世界基本都在）
+        高/宽 ≈ 0.55 → 约 −66°~74°
+     所以这里把高度**绑到视口宽度**上（min(66vh, 52vw)）而不是只写 vh：
+     纯 vh 在超宽屏上比例会失控（1920 宽下只露 ±50°），
+     vh 那一项则防止宽高比反过来（横屏手机 844×390，52vw=439 会高过屏幕）。
+     max 兜住超大屏，min 保证窄屏也够高。 */
+  --map-h: clamp(340px, min(66vh, 52vw), 760px);
+
+  /* ---------- 动效 ---------- */
+  --ease: cubic-bezier(.32, .72, .28, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --dur-fast: .16s;
+  --dur: .26s;
+  --dur-slow: .42s;
+
+  --z-map-overlay: 5;
+  --z-modal: 60;
+  --z-lightbox: 80;
+  --z-boot: 100;
+}
+
+/* 尊重系统"减少动态效果" */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: .01ms; --dur: .01ms; --dur-slow: .01ms; }
+  * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

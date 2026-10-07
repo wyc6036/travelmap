@@ -1,0 +1,234 @@
+/* =========================================================
+   layout.css · 应用骨架（侧栏 / 主区 / 栅格 / 响应式）
+   对应 UI_Ref.jpeg 的"左侧固定侧栏 + 右侧内容区"结构
+   ========================================================= */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ----------------- 侧栏 ----------------- */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  padding: 20px 14px 14px;
+  border-right: 1px solid var(--line-soft);
+}
+
+.sidebar__brand { padding: 0 8px 18px; }
+
+/* 窄屏替代标识：默认隐藏，仅在侧栏收成 68px 时出现 */
+.brand__mark { display: none; width: 26px; height: 26px; color: var(--primary-ink); }
+
+.brand__title {
+  font-family: var(--font-script);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: .01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.brand__sub {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  letter-spacing: .08em;
+}
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+
+.sidebar__foot { margin-top: auto; padding-top: 16px; }
+
+.sidebar__art { margin-top: 10px; width: 100%; height: auto; opacity: .95; }
+
+/* ----------------- 主区 ----------------- */
+.main { min-width: 0; min-height: 0; }
+
+.main__scroll {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 22px 8px;
+  scroll-behavior: smooth;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.topbar__title { font-size: var(--fs-2xl); font-weight: 700; }
+.topbar__sub { margin-top: 2px; font-size: var(--fs-md); color: var(--ink-2); }
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ----------------- 视图容器 ----------------- */
+.view { display: flex; flex-direction: column; gap: var(--gap); padding-bottom: 4px; }
+.view[hidden] { display: none; }
+
+/* ----------------- 栅格 ----------------- */
+.grid { display: grid; gap: var(--gap); align-items: start; }
+
+/* 左列（最近足迹 + 愿望清单 + 我的记录 上下叠放） : 右列（旅途海报）≈ 44 : 56
+   ⚠️ 左列是**嵌套**结构：外面两列，左列内部再纵向叠三张卡。
+      不能写成 grid--main 三列再靠 span 拼——那样左列各卡的高度会互相牵连
+      （矮的那张被拉高或留白），而它们内容高度本来就不同。
+   ⚠️ 两列**故意等高**：`.grid` 默认 `align-items: start`，这里改回 stretch，
+      让海报卡跟着左列一起长高，两张卡的上下边缘各自对齐（用户明确要求"模块之间保持对齐"）。
+      海报墙自己再按比例吃掉这份高度，见 css/poster.css。 */
+.grid--main { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); align-items: stretch; }
+.maincol { display: grid; gap: var(--gap); min-width: 0; align-content: start; }
+
+/* 页脚 */
+.sitefoot {
+  margin-top: 18px;
+  padding: 10px 2px 18px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  line-height: 1.6;
+}
+.sitefoot__sep { opacity: .5; }
+.sitefoot a { color: var(--ink-2); }
+
+/* =========================================================
+   响应式
+   - >=1440 : 完整三栏视觉
+   - 1200~1440 : 侧栏收窄
+   - 980~1200  : 侧栏仅图标
+   - <980     : 单列纵向堆叠
+   ========================================================= */
+
+@media (max-width: 1440px) {
+  :root { --sidebar-w: 190px; --gap: 14px; }
+  .brand__title { font-size: var(--fs-2xl); }
+}
+
+@media (max-width: 1200px) {
+  .grid--main { grid-template-columns: minmax(0, 1fr); }
+  /* 宽图表只剩一列、地图卡片几乎占满主区，继续用 min(vh, vw) 锁"高/宽"比例，
+     保证默认的世界视角不被压窄（比例关系见 tokens.css 的 --map-h 注释）。 */
+  :root { --map-h: clamp(300px, min(60vh, 56vw), 660px); }
+}
+
+@media (max-width: 1040px) {
+  :root { --sidebar-w: 68px; }
+
+  .brand__title,
+  .brand__sub,
+  .nav__item span,
+  .link span { display: none; }
+  .nav__item { justify-content: center; padding: 10px; }
+  .sidebar { padding: 16px 8px 12px; align-items: center; }
+  .sidebar__brand { padding: 0 0 12px; }
+  /* 68px 宽放不下「My Travel Map」（手写体约 116px），改用图标标识 */
+  .brand__title { display: none; }
+  .brand__mark { display: block; }
+  .sidebar__art { display: none; }
+  /* 68px 的侧栏塞不下任何说明文字：只保留头像，
+     否则「已点亮 21 个国家/地区」会被挤成竖排，很难看 */
+  .usercard { align-items: center; padding: 8px; }
+  .usercard__hi,
+  .usercard__line,
+  .usercard .link,
+  .progress { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   图标导轨专属（981–1040px）：鼠标悬停 / 键盘聚焦时在图标右侧弹出文字提示。
+   ⚠️ 这条规则**只能**落在这个区间里，别并回上面的 `max-width: 1040px`：
+
+     · 起始于 1040px：侧栏收成 68px 导轨，图标没有文字，需要提示补位。
+     · 结束于 980px：980px 及以下侧栏变成**横向顶栏**，`.nav__item` 排成一行、
+       彼此只隔 4px，而提示框是 `left: calc(100% + 8px)` —— 它会**直接压到右边
+       那个图标上**。触屏点击后 `:hover` 还会残留（iOS Safari 尤其明显），
+       于是"被选中的那一项右边多出一条深色粗短横线"。
+     · 提示文案来自 `data-label`（见 index.html）。**七个按钮都必须带**：
+       属性缺失时 `content: attr(data-label)` 只是个空串，只剩 `padding: 3px 8px`
+       撑出的 16×6 圆角深色块 —— 和上面那条 bug 的样子一模一样（实测确认）。
+   --------------------------------------------------------------------------- */
+@media (min-width: 981px) and (max-width: 1040px) {
+  .nav__item:hover::after,
+  .nav__item:focus-visible::after {
+    content: attr(data-label);
+    position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+    background: var(--ink); color: #fff; font-size: var(--fs-sm);
+    padding: 3px 8px; border-radius: var(--r-xs); white-space: nowrap; z-index: 10;
+  }
+}
+
+@media (max-width: 980px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 100vh; }
+
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+    position: sticky; top: 0; z-index: 20;
+    background: var(--bg);
+    overflow-x: auto;
+  }
+  .sidebar__brand { padding: 0 6px 0 0; flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+  /* 顶栏是横向的，空间够，恢复完整文字 logo */
+  .brand__mark { display: block; }
+  .brand__title { display: block; font-size: var(--fs-xl); }
+  .brand__sub { display: none; }
+  .nav { flex-direction: row; gap: 4px; }
+  .sidebar__foot { margin: 0 0 0 auto; padding: 0; flex: 0 0 auto; }
+  /* 提高一级特异性：不依赖文件加载顺序，避免被 components.css 的 display:flex 反杀 */
+  .sidebar .usercard { display: none; }
+
+  .main__scroll { height: auto; overflow: visible; padding: 14px 14px 8px; }
+  /* 下限 268px 是按「概览卡**展开**时的高度」定的：卡片整块收起后默认不占地方，
+     但用户一点开关它就整张展开（且还原了原设计尺寸，比上一版更高），
+     下限必须按展开态留余量，否则窄屏一展开就把卡片顶出地图上沿。
+     480px 宽下 46vw≈221px 已低于下限，取下限后卡片 + 16px 底距仍在余量内。
+     高/宽比例同样按默认世界视角来定：手机单列时地图卡片接近竖长，
+     58vw 就能把世界露出七成（详见 tokens.css 的 --map-h 注释）。
+     再叠一层 62vh 是给**横屏手机**兜底（844×390 下 58vw=489 会高过屏幕）。 */
+  :root { --map-h: clamp(280px, min(58vw, 62vh), 380px); }
+}
+
+@media (max-width: 620px) {
+  .topbar__right { width: 100%; }
+  .searchbar { flex: 1 1 140px; }
+  .btn--primary { padding: 8px 12px; }
+  /* 概览卡窄屏压一档内边距与行距（保住「不顶出地图上沿」）。
+     ⚠️ 原来这里还有 `transform: scale(.92)`，现**已去掉**：
+     transform 不影响布局盒，卡片视觉上缩了、占位没缩，而展开态的开关按钮
+     是相对 .statwrap（未缩放的盒子）定位的，卡片一缩按钮就会飘到卡片外面。
+     实测光靠压内边距（13/16/14 → 11/14/12、gap 3 → 2）就够放进 268px 下限里，
+     顺带也避开了缩放带来的文字发虚。 */
+  .statcard { padding: 11px 14px 12px; gap: 2px; }
+  .statcard .legend { margin-top: 8px; padding: 5px 9px; }
+
+  /* 「最近足迹」卡片窄屏排 2 列：卡宽只剩通栏的一半不到，
+     4 列会把每张缩略图压到 100px 以下。2 列正好铺满整行。
+     ⚠️ 别用 repeat(auto-fit, minmax(126px, 240px))：max 是确定值时，
+     自动重复次数按 max 算，592px 的卡只会排到 2 条 240 的轨道、右边空一截。 */
+  #tm-card-recent .mediagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

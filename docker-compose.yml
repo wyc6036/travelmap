@@ -1,0 +1,60 @@
+# =========================================================
+# docker-compose.yml · 一键部署 TravelMap + MinIO
+# 用法：
+#   docker compose up -d --build
+#   浏览器访问 http://<小主机IP>:8080
+#
+# 媒体文件统一存进 MinIO（S3 兼容对象存储）。
+# MinIO 的磁盘落盘默认绑定挂载到项目内的 ./minio-data（Finder 可直接查看/备份/拷贝）。
+# 想存到别的目录：在 docker-compose.yml 同级建 .env，写 MINIO_DATA_DIR=/你的/绝对/路径，
+# 然后 docker compose up -d 即可。
+# 不想要内置 MinIO 的话：删掉 minio 服务，并在 travelmap 的 environment
+# 里把 MINIO_ENDPOINT 改成你自己的 MinIO / S3 地址即可。
+#
+# 应用数据（SQLite 库 + 上传的媒体缩略图）默认绑定挂载到项目内的 ./data
+# （Finder 可直接查看/备份，容器重建不丢）。
+# 想换目录：在同级 .env 里写 APP_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
+# =========================================================
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: travelmap-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: travelmap
+      MINIO_ROOT_PASSWORD: changeme-minio-password
+    ports:
+      # 9001 是管理控制台；如需在宿主机用 mc 操作 API，自行加 "9000:9000"
+      - "9001:9001"
+    # 媒体落盘：默认绑定到项目内 ./minio-data（Finder 可直接查看/备份）。
+    # 想换目录：在同级 .env 里写 MINIO_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
+    volumes:
+      - ${MINIO_DATA_DIR:-./minio-data}:/data
+    restart: unless-stopped
+
+  travelmap:
+    build: .
+    container_name: travelmap
+    depends_on:
+      - minio
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATA_DIR=/data
+      # 必填：访问密码。留空则任何人都可访问并写入（仅本地测试时用）。
+      - ADMIN_PASSWORD=change-me-please
+      # 选填：会话签名密钥。不填则每次容器重启随机生成（已登录会话会失效需重登）。
+      - SESSION_SECRET=
+      # 媒体存储：MinIO（S3 兼容）
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=travelmap
+      - MINIO_SECRET_KEY=changeme-minio-password
+      - MINIO_BUCKET=travelmap
+    volumes:
+      # 应用数据（SQLite 库 + 上传媒体）：默认绑定到项目内 ./data（Finder 可直接查看/备份）。
+      # 想换目录：在同级 .env 里写 APP_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
+      - ${APP_DATA_DIR:-./data}:/data
+    restart: unless-stopped

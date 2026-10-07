@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 675" width="900" height="675" role="img" aria-label="图片占位图">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EDF3F7"/>
+      <stop offset="1" stop-color="#F7F1E8"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C9D6DE"/>
+      <stop offset="1" stop-color="#AEC5D9"/>
+    </linearGradient>
+    <clipPath id="cut"><rect width="900" height="675"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#cut)">
+    <rect width="900" height="675" fill="url(#sky)"/>
+    <circle cx="716" cy="140" r="52" fill="#E3C98F" opacity=".5"/>
+    <circle cx="716" cy="140" r="34" fill="#E3C98F" opacity=".55"/>
+
+    <!-- 远山 -->
+    <path d="M0 470 L150 330 L262 424 L360 316 L520 470 Z" fill="url(#hill)" opacity=".55"/>
+    <path d="M330 470 L520 292 L640 400 L760 300 L900 470 Z" fill="url(#hill)" opacity=".8"/>
+
+    <!-- 近山 -->
+    <path d="M0 675 L0 520 L170 424 L330 540 L470 430 L640 556 L790 470 L900 546 L900 675 Z" fill="#B9C6A6" opacity=".85"/>
+    <path d="M0 675 L0 592 L210 512 L420 620 L620 528 L900 636 L900 675 Z" fill="#E0A183" opacity=".55"/>
+
+    <!-- 图钉 -->
+    <g transform="translate(432 300) scale(3.1)">
+      <path d="M13 34C13 34 23.4 19.6 23.4 11.6A10.4 10.4 0 1 1 2.6 11.6C2.6 19.6 13 34 13 34Z"
+            fill="#2E4460" stroke="#FFFFFF" stroke-width="1.4"/>
+      <circle cx="13" cy="11" r="4.2" fill="#FFFFFF"/>
+    </g>
+  </g>
+
+  <text x="450" y="632" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+        font-size="20" fill="#8B8578">图片暂不可用 · placeholder</text>
+</svg>

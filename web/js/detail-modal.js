@@ -1,0 +1,763 @@
+/**
+ * detail-modal.js · 媒体详情弹窗（仿微信朋友圈）
+ * -----------------------------------------------------------
+ * 结构：
+ *   上半 ─ 地图（独立 MapLibre 实例）
+ *   下半 ─ 关联的多媒体资料（图片 / 视频 / 文字）
+ *
+ * 两种内容（2026-10-05 起）：
+ *   ① **地点**：地图显示该地点 + 附近足迹的图钉，内容是该地点的媒体 —— 沿用原逻辑。
+ *   ② **行程**（多地点行程的折叠头的标题被点开时）：地图不再放图钉，而是把这条
+ *      路线"走一遍"（虚线从起点逐渐延伸到终点 + 脚印光标，见 js/route.js）；
+ *      内容是该行程**所有地点媒体的汇总**。
+ *      点行程组里的**具体某个地点**走的是 ①，不放动画。
+ *
+ * 核心交互：
+ *   1. 滚动边缘模糊（ScrollEdgeEffect）
+ *      滚动下半部分内容时，顶部地图高度在 320px → 132px 之间平滑收缩，
+ *      同时叠加一层逐渐增强的 backdrop-filter 模糊与底部渐隐，衔接不生硬。
+ *      实现：滚动进度 p ∈ [0,1] 写入 CSS 变量 --mw-h / --mw-blur / --mw-p，
+ *      由 CSS 负责表现，JS 只做一帧一次的计算（rafThrottle），并同步 map.resize()。
+ *   2. 全屏预览：点击图片/视频进入 lightbox，支持左右切换（按钮 + ← → 键）。
+ *   3. 关闭：右上角按钮 / 点击遮罩 / ESC。关闭时**必须**停掉路线动画并清干净图层与标记。
+ */
+
+import { CONFIG, MEDIA_LABELS, regionLabel } from './config.js';
+import {
+  escapeHtml, formatDateRange, formatDateDot, clamp,
+  rafThrottle, distanceKm, warnOnce, mixHex,
+} from './utils.js';
+import { createMap, setBaseStyle } from './map.js';
+import { addCountryLayers, applyVisitedCountries, partsOfCountry } from './countries.js';
+import { PIN, PIN_BODY, PIN_LIFT, pinSvg } from './markers.js';
+import { createRouteAnim } from './route.js';
+
+/** 地图收缩后的最小高度（仍保留足够的地理上下文） */
+const MIN_MAP_H = 132;
+
+/**
+ * 小地图的图钉基准缩放。
+ * 小地图 zoom≈10，视野只有几十公里，主图那套按 zoom 递减的 --pin-scale 不适用；
+ * 这里固定放大一点，让 14×20 的钉子在 300px 高的小地图里不至于太小。
+ */
+const DETAIL_PIN_SCALE = 1.15;
+
+/**
+ * 小地图上"已访问"色块的不透明度。
+ * 小地图 zoom≈10，视野内基本只有当前所在的一个国家，纯色满铺会把整块地图糊成一片色；
+ * 降到 0.5 让暖米色底图透出来，更接近"淡淡的国土底色"的观感。
+ */
+const DETAIL_FILL = { fillOpacity: 0.5 };
+
+function pinElement(color, active) {
+  const body = color || PIN_BODY;
+  const el = document.createElement('div');
+  el.className = `tm-pin${active ? ' is-active' : ''}`;
+  /* 与主图图钉同一套变量（见 js/markers.js createPinElement）：
+     主体色 = 类型色，提亮色由类型色派生，保证小地图上的钉子与主图一致。 */
+  el.style.setProperty('--pin-body', body);
+  el.style.setProperty('--pin-body-lift', mixHex(body, '#FFFFFF', PIN_LIFT));
+  el.style.setProperty('--pin-accent', body);
+  el.style.setProperty('--pin-scale', String(DETAIL_PIN_SCALE));
+  // 几何与主图共用同一份（js/markers.js pinSvg），不要在这里另写一遍路径
+  el.innerHTML = `<div class="tm-pin__inner">${
+    pinSvg({ bodyClass: 'tm-pin__body', holeClass: 'tm-pin__hole' })
+  }</div>`;
+  return el;
+}
+
+/** 取媒体中"可全屏预览"的部分（图片 / 视频） */
+const isViewable = (m) => m.type === 'image' || m.type === 'video';
+
+/**
+ * 点击目标是否落在"点哪儿关窗口"的区域上（遮罩 / 关闭按钮，标了 data-close="1"）。
+ *
+ * ⚠️ 必须用 closest() 向上找，不能用 `target instanceof HTMLElement && target.dataset.close`：
+ * 关闭按钮里包着 `<svg><use/></svg>`，用户点的往往是图标本身，此时
+ * `e.target` 是 SVGElement —— 它**不是** HTMLElement，那个判断会直接漏掉，
+ * 表现就是"点叉号没反应"（但按钮的空白边缘能点中，所以肉眼很难看出规律）。
+ */
+function isCloseTarget(target) {
+  return target instanceof Element && target.closest('[data-close="1"]') !== null;
+}
+
+export function createDetailModal({
+  colorOf, worldGeoJSON, getPlaces, getTrips, getVisited, getStyleKey,
+}) {
+  const modal = document.getElementById('tm-modal');
+  const panel = modal.querySelector('.modal__panel');
+  const bodyEl = document.getElementById('tm-modal-body');
+  const mapwrapEl = document.getElementById('tm-modal-mapwrap');
+  const titleEl = document.getElementById('tm-modal-title');
+  const subEl = document.getElementById('tm-modal-sub');
+  const dotEl = document.getElementById('tm-modal-dot');
+  const tabsEl = document.getElementById('tm-modal-tabs');
+  const contentEl = document.getElementById('tm-modal-content');
+  const badgeEl = document.getElementById('tm-modal-badge');
+  const closeBtn = document.getElementById('tm-modal-close');
+
+  const lightbox = document.getElementById('tm-lightbox');
+  const lbStage = document.getElementById('tm-lb-stage');
+  const lbCounter = document.getElementById('tm-lb-counter');
+  const lbCaption = document.getElementById('tm-lb-caption');
+  const lbPrev = document.getElementById('tm-lb-prev');
+  const lbNext = document.getElementById('tm-lb-next');
+
+  let detailMap = null;
+  let detailMarkers = [];
+  let routeAnim = null;
+  /** 当前展示内容的"视图对象"：{ kind, ref, name, sub, badge, color, media, mediaCount, places? }
+   *  renderTabs / renderContent 只认 `.media` 与 `.mediaCount`，
+   *  所以地点和行程可以共用同一套渲染，不需要两遍。 */
+  let current = null;
+  let activeTab = null;
+  let boundStyleKey = null;
+  let scrollMaxH = 320;
+  let lastFocus = null;
+
+  /* 行程模式里被点选的站点（place id，null = 没选）。
+     选中后：下面的媒体只显示那一站的，地图上其余打点压灰。点地图空白恢复。 */
+  let stopFilter = null;
+
+  /* 全屏预览状态 */
+  let lbList = [];
+  let lbIndex = 0;
+
+  /* =========================================================
+   * 小地图
+   * ========================================================= */
+  function ensureDetailMap() {
+    if (detailMap) return detailMap;
+    detailMap = createMap('tm-modal-map', {
+      /* 用 detailMap 自己的占位中心，**不要**复用 CONFIG.view.center ——
+         后者已改成"世界视角"的中心（[20,15]），拿来当小地图占位会语义串味。
+         这个 center 只活到第一次 renderDetailMarkers() 的 jumpTo。 */
+      center: CONFIG.detailMap.center,
+      zoom: CONFIG.detailMap.zoom,
+      minZoom: CONFIG.detailMap.minZoom,
+      maxZoom: CONFIG.detailMap.maxZoom,
+      /* 必须关掉 MapLibre 自带的容器 ResizeObserver（createMap 默认透传 true）：
+         滚动收缩时 .modal__mapwrap 的高度逐帧变（--mw-h），内置观察器会跟着逐帧
+         map.resize() —— resize 清画布缓冲 + 取消在途瓦片请求，就是滚动时地图
+         "闪一下白"的根源（2026-10-06 探针实测：滚动 20 步 canvas 高度变了 20 次）。
+         关掉后 resize 只发生在"打开弹窗"与"窗口尺寸变化"这两处（滚动期间一次都不调）。 */
+      trackResize: false,
+    });
+    detailMap.dragRotate?.disable?.();
+    // 小地图铺在内容区顶部之上，若它自己吃掉滚轮（默认用于缩放），
+    // 用户在地图区域内滚动就会"卡住"。这里改为把滚轮转交给内容区，
+    // 双指/双击缩放（doubleClickZoom）与拖拽平移仍然保留。
+    detailMap.scrollZoom?.disable?.();
+    mapwrapEl.addEventListener('wheel', (e) => {
+      bodyEl.scrollTop += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+    boundStyleKey = getStyleKey();
+    window.__tmDetailMap = detailMap;      // 调试入口
+
+    // 每次样式加载完成后重新挂载国家图层与上色
+    detailMap.registerStyleHook((m) => {
+      if (!worldGeoJSON) return;
+      addCountryLayers(m, worldGeoJSON);
+      applyVisitedCountries(m, getVisited(), DETAIL_FILL);
+    });
+    /* 路线动画。⚠️ 必须在上面那个 style hook **之后**构造 ——
+       registerStyleHook 的执行顺序 = 图层叠放顺序，早注册的会被后注册的压住，
+       顺序反了路线折线就藏在国土色块底下（不报错，只是看不见）。 */
+    routeAnim = createRouteAnim(detailMap);
+    /* 站点被点 / 地图空白被点 → 切换媒体筛选。
+       站号要换成 place id：routeAnim 内部会滤掉没有坐标的地点，站号与 places 不保证对齐。 */
+    routeAnim.onStopSelect((idx) => {
+      if (current?.kind !== 'trip') return;
+      if (idx === null) { if (stopFilter !== null) applyStopFilter(null); return; }
+      const id = routeAnim.getStopIds()[idx];
+      if (id == null) return;
+      applyStopFilter(stopFilter === id ? null : id);      // 再点同一站 = 取消
+    });
+    return detailMap;
+  }
+
+  function syncDetailStyle() {
+    const key = getStyleKey();
+    if (!detailMap || key === boundStyleKey) return;
+    boundStyleKey = key;
+    setBaseStyle(detailMap, key);
+  }
+
+  /** 清空小地图上的图钉（行程模式要的是"只剩路线"，不是"路线 + 一堆邻居"） */
+  function clearDetailMarkers() {
+    detailMarkers.forEach((m) => { try { m.remove(); } catch (_) { /* 忽略 */ } });
+    detailMarkers = [];
+  }
+
+  /** 小地图上的图钉：选中地点 + 附近足迹 */
+  function renderDetailMarkers(place) {
+    clearDetailMarkers();
+
+    const radius = CONFIG.detailMap.nearbyRadiusKm;
+    const nearby = (getPlaces() || []).filter((p) => (
+      p.id !== place.id && distanceKm(place.lng, place.lat, p.lng, p.lat) <= radius
+    ));
+    const list = [...nearby, place];
+
+    for (const p of list) {
+      const isMain = p.id === place.id;
+      const el = pinElement(colorOf(p), isMain);
+      el.title = p.name;
+      if (!isMain) {
+        // 邻近足迹：退到背景。用 --pin-scale 而不是直接写 transform，
+        // 否则会覆盖 .tm-pin__inner 的 hover/选中位移。
+        el.style.opacity = '.72';
+        el.style.setProperty('--pin-scale', String(DETAIL_PIN_SCALE * 0.82));
+      }
+      el.addEventListener('click', () => {
+        if (isMain) return;
+        open(p);           // 点小地图上的邻近图钉 → 直接切换详情
+      });
+      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([p.lng, p.lat])
+        .addTo(detailMap);
+      detailMarkers.push(marker);
+    }
+
+    detailMap.jumpTo({ center: [place.lng, place.lat], zoom: CONFIG.detailMap.zoom });
+    // 让小地图略微下移目标点，给图钉留出视觉空间
+    detailMap.easeTo({
+      center: [place.lng, place.lat], duration: 0,
+    });
+  }
+
+  /* =========================================================
+   * 滚动边缘模糊 / 地图收缩
+   * ---------------------------------------------------------
+   * 滚动时只逐帧改外层 .modal__mapwrap 的高度（CSS 变量 --mw-h），
+   * 里面的 .modal__map 高度恒为 --mw-max 并垂直居中（见 css/modal.css）。
+   *
+   * ⚠️ 2026-10-06：**滚动期间一次 map.resize() 都不能有**。
+   *    旧写法是"高度变化 ≥28px 就 resize + 停止滚动后再补一次"，已经算节流了，
+   *    但录屏对照实验（tm-modal-flicker.mjs）证明：每一次 resize 都会让合成器
+   *    抓到一帧空画布（亮度 +18 的尖峰），节流到 6 次仍然闪 6 次；
+   *    而"resize 变空操作"那组全程只有 1 处突变 —— 闪就是 resize 本身造成的。
+   *    改成"容器尺寸恒定 + 居中裁切"后，容器尺寸在滚动期间根本不变，
+   *    于是既不需要 resize，也不会有构图跳变（可见区始终以地图中心为中心）。
+   *
+   *    另外说明：MapLibre 自带的容器 ResizeObserver（trackResize）也必须关掉
+   *    （见 ensureDetailMap），否则它会绕过这里、逐帧 resize。
+   * ========================================================= */
+
+  function syncScrollEffect() {
+    // 收缩行程 = 地图最大高度 - 最小高度；滚动量与收缩量严格 1:1，
+    // 于是标题始终贴着地图下沿（推导见 css/modal.css 中 .modal__body 注释）。
+    const dist = Math.max(1, scrollMaxH - MIN_MAP_H);
+    const p = clamp(bodyEl.scrollTop / dist, 0, 1);
+    const h = scrollMaxH - dist * p;
+    panel.style.setProperty('--mw-h', `${h.toFixed(2)}px`);
+    // 模糊上限刻意压到 2.6px：再高会把地图糊成一片，反而失去"局部放大"的信息量
+    panel.style.setProperty('--mw-blur', `${(p * 2.6).toFixed(2)}px`);
+    panel.style.setProperty('--mw-p', p.toFixed(3));
+    panel.classList.toggle('is-scrolled', p > 0.02);
+    /* 这里**不再**调 map.resize() —— 原因见本段注释（滚动期 resize = 闪白）。
+       画布尺寸恒为 --mw-max，容器尺寸全程不变，构图也就不需要重算。 */
+  }
+  const onScroll = rafThrottle(syncScrollEffect);
+
+  /** 依据面板高度重算地图最大高度，并同步 --mw-max（占位高度必须与之相等） */
+  function measureMaxH() {
+    scrollMaxH = clamp(panel.clientHeight * 0.42, 176, 340);
+    panel.style.setProperty('--mw-max', `${scrollMaxH}px`);
+    return scrollMaxH;
+  }
+
+  /* =========================================================
+   * 内容渲染
+   * ---------------------------------------------------------
+   * ⚠️ 下面三个函数只认 `view.media` 与 `view.mediaCount`，**不认** place / trip。
+   *    所以"地点"和"行程"共用同一套渲染：行程只是一个把各地点媒体汇总起来的 view
+   *    （见 mediaOfTrip / tripView）。加第三种内容类型时也不用动这里。
+   * ========================================================= */
+  function tabsFor(view) {
+    const counts = view.mediaCount;
+    return ['image', 'video', 'text']
+      .filter((t) => counts[t] > 0)
+      .map((t) => ({ type: t, count: counts[t] }));
+  }
+
+  function renderTabs(view) {
+    const tabs = tabsFor(view);
+    tabsEl.innerHTML = '';
+    if (!tabs.length) return;
+
+    if (!activeTab || !tabs.some((t) => t.type === activeTab)) {
+      activeTab = tabs[0].type;
+    }
+
+    tabs.forEach(({ type, count }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `tabs__btn${type === activeTab ? ' is-active' : ''}`;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', String(type === activeTab));
+      btn.innerHTML = `${MEDIA_LABELS[type]}<b>${count}</b>`;
+      btn.addEventListener('click', () => {
+        activeTab = type;
+        rerenderContent();
+      });
+      tabsEl.append(btn);
+    });
+
+    renderFilterChip(view);     // 行程模式选了站 → Tab 行右端补一枚筛选徽标
+  }
+
+  /**
+   * 当前**真正要渲染**的视图。
+   * 行程模式选了某一站时，media 换成那一站的 —— Tab 计数与网格都随之收窄。
+   * ⚠️ Tab 的点击回调也要走这里：闭包里攥着旧的 view 参数会把筛选"冲掉"。
+   */
+  function renderView() {
+    if (current?.kind !== 'trip' || !stopFilter) return current;
+    const stop = (current.stops || []).find((s) => s.id === stopFilter);
+    if (!stop) return current;
+    return { ...current, media: stop.media, mediaCount: stop.count };
+  }
+
+  /** Tab / 筛选变化后的统一重绘入口 */
+  function rerenderContent() {
+    const view = renderView();
+    renderTabs(view);
+    renderContent(view);
+    syncScrollEffect();
+  }
+
+  /**
+   * 切换站点筛选。
+   * @param {string|null} id 地点 id；null = 恢复整条行程的媒体
+   */
+  function applyStopFilter(id) {
+    stopFilter = id;
+    if (routeAnim) {
+      routeAnim.settle();                       // 动画没走完也要立刻看到全貌
+      const ids = routeAnim.getStopIds();
+      routeAnim.highlight(id == null ? null : ids.indexOf(id));
+    }
+    rerenderContent();
+  }
+
+  /**
+   * 站点筛选徽标（行程模式且选中了某一站时出现）。
+   * 放在 Tab 行里跟着一起吸顶：滚到多低都能看见"现在只看哪一站"，
+   * 也给"点地图空白恢复"提供一个不用回到地图上的出口。
+   */
+  function renderFilterChip(view) {
+    const old = tabsEl.querySelector('.tabs__filter');
+    if (old) old.remove();
+    if (view?.kind !== 'trip' || !stopFilter) return;
+    const stop = (view.stops || []).find((s) => s.id === stopFilter);
+    if (!stop) return;
+
+    const chip = document.createElement('span');
+    chip.className = 'tabs__filter';
+    chip.innerHTML = `<span class="tabs__filter-name">${escapeHtml(stop.name)} · ${stop.count.total}</span>`
+      + '<button type="button" data-clear-stop="1" aria-label="显示全部">'
+      + '<svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>';
+    chip.querySelector('button').addEventListener('click', () => applyStopFilter(null));
+    tabsEl.append(chip);
+  }
+
+  function mediaCell(item, list, idx, { wide = false } = {}) {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = `mgrid__cell${item.type === 'video' ? ' mgrid__cell--video' : ''}${wide ? ' mgrid__cell--wide' : ''}`;
+    cell.title = item.caption || '点击全屏查看';
+
+    const thumb = item.type === 'video' && item.poster ? item.poster : item.url;
+    cell.innerHTML = `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.caption || '')}" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+    if (item.type === 'video') {
+      cell.insertAdjacentHTML('beforeend',
+        '<span class="mgrid__play"><svg class="ico" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>');
+    }
+    cell.insertAdjacentHTML('beforeend', `<span class="mgrid__count">${idx + 1}/${list.length}</span>`);
+
+    const img = cell.querySelector('img');
+    img?.addEventListener('error', () => {
+      img.src = './assets/placeholder-photo.svg';
+    });
+
+    cell.addEventListener('click', () => openLightbox(list, idx));
+    return cell;
+  }
+
+  function renderContent(view) {
+    contentEl.innerHTML = '';
+    const items = view.media.filter((m) => m.type === activeTab);
+
+    if (activeTab === 'text') {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal__section';
+      items.forEach((m) => {
+        const card = document.createElement('div');
+        card.className = 'notecard';
+        card.style.marginBottom = '10px';
+        card.innerHTML = (m.caption ? `<p class="notecard__title">${escapeHtml(m.caption)}</p>` : '')
+          + escapeHtml(m.text || '');
+        wrap.append(card);
+      });
+      contentEl.append(wrap);
+      return;
+    }
+
+    const list = items.filter(isViewable);
+    const grid = document.createElement('div');
+    grid.className = 'mgrid';
+    list.forEach((item, i) => {
+      // 首图占两格，形成朋友圈那种错落感（仅在图片数 ≥3 时启用）
+      const wide = i === 0 && list.length >= 3;
+      grid.append(mediaCell(item, list, i, { wide }));
+    });
+    contentEl.append(grid);
+  }
+
+  /* =========================================================
+   * 全屏预览
+   * ========================================================= */
+  function renderLightbox() {
+    const item = lbList[lbIndex];
+    if (!item) return;
+    lbStage.innerHTML = '';
+    lbStage.classList.remove('is-switching');
+    void lbStage.offsetWidth;                 // 重排以重播动画
+    lbStage.classList.add('is-switching');
+
+    if (item.type === 'video') {
+      const video = document.createElement('video');
+      video.src = item.url;
+      video.controls = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.preload = 'metadata';
+      // 视频兜底：取源失败时退化为封面图，避免出现"黑框"
+      video.addEventListener('error', () => {
+        const img = document.createElement('img');
+        img.src = item.poster || './assets/placeholder-photo.svg';
+        img.alt = item.caption || '';
+        lbStage.innerHTML = '';
+        lbStage.append(img);
+      }, { once: true });
+      lbStage.append(video);
+    } else {
+      const img = document.createElement('img');
+      img.src = item.url;
+      img.alt = item.caption || '';
+      img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => {
+        img.src = './assets/placeholder-photo.svg';
+      }, { once: true });
+      lbStage.append(img);
+    }
+
+    lbCounter.textContent = lbList.length > 1 ? `${lbIndex + 1} / ${lbList.length}` : '';
+    lbCaption.textContent = item.caption || '';
+    lbPrev.disabled = lbIndex <= 0;
+    lbNext.disabled = lbIndex >= lbList.length - 1;
+  }
+
+  function openLightbox(list, index) {
+    lbList = list;
+    lbIndex = index;
+    lightbox.hidden = false;
+    lightbox.classList.remove('is-closing');
+    renderLightbox();
+    lbNext.focus();
+  }
+
+  function closeLightbox() {
+    if (lightbox.hidden) return;
+    lightbox.hidden = true;
+    lbStage.innerHTML = '';
+    lbList = [];
+  }
+
+  function stepLightbox(delta) {
+    const next = lbIndex + delta;
+    if (next < 0 || next >= lbList.length) return;
+    lbIndex = next;
+    renderLightbox();
+  }
+
+  /* =========================================================
+   * 打开 / 关闭
+   * ========================================================= */
+
+  /** 把 media 的数目数出来（行程要汇总各地点，不能直接用某个地点的 mediaCount） */
+  function countMedia(media) {
+    const c = { image: 0, video: 0, text: 0, total: 0 };
+    media.forEach((m) => { if (c[m.type] !== undefined) c[m.type] += 1; c.total += 1; });
+    return c;
+  }
+
+  /** 地点视图 */
+  function placeView(place) {
+    const country = place.countryZh ? `${place.countryZh} · ` : '';
+    return {
+      kind: 'place',
+      ref: place,
+      name: place.name,
+      sub: place.date
+        ? `${country}${formatDateRange(place.date, place.endDate)}`
+        : `${country}到访记录`,
+      badge: place.countryZh
+        ? `${place.countryZh} · ${place.lng.toFixed(2)}, ${place.lat.toFixed(2)}`
+        : `${place.lng.toFixed(2)}, ${place.lat.toFixed(2)}`,
+      color: colorOf(place),
+      media: place.media,
+      mediaCount: place.mediaCount,
+    };
+  }
+
+  /**
+   * 行程视图。
+   * 媒体 = 各地点媒体**按到访顺序**串起来（每条的 caption 里本来就带地名，
+   * 所以不必再套一层分组标题），计数 = 各地点之和。
+   * `stops` 保留每一站自己的媒体 —— 地图上的打点被点中时，下面只显示那一站的。
+   */
+  function tripView(trip) {
+    const places = [...trip.places].sort((a, b) => (a.dateTs || 0) - (b.dateTs || 0));
+    const media = [];
+    const stops = places.map((p) => {
+      p.media.forEach((m) => media.push(m));
+      return { id: p.id, name: p.name, media: p.media, count: countMedia(p.media) };
+    });
+    const region = regionLabel(places);
+    const range = trip.endDate
+      ? formatDateRange(trip.date, trip.endDate)
+      : formatDateDot(trip.date);
+    return {
+      kind: 'trip',
+      ref: trip,
+      places,
+      stops,
+      name: trip.name,
+      sub: [range || '—', `${places.length} 个地点`, region].filter(Boolean).join(' · '),
+      badge: [`${places.length} 个地点`, region].filter(Boolean).join(' · '),
+      color: colorOf(places[0]),
+      media,
+      mediaCount: countMedia(media),
+    };
+  }
+
+  /**
+   * 站点所在国家/地区的包围盒 —— 取景时的"地理上下文"。
+   * 只装下路线会把地图顶到街道级，看不出这两站相对于国家在哪；
+   * 把国家多边形一起量进包围盒，取景自然退到"看得到全国"的档位。
+   * （route.js 还有一条保底：最多比"只装路线"低 1.1 档，防大国的盒子把路线压没。）
+   */
+  function contextBoundsFor(places) {
+    if (!worldGeoJSON?.features?.length) return null;
+    const ids = new Set();
+    places.forEach((p) => {
+      if (p.countryId) partsOfCountry(p.countryId).forEach((x) => ids.add(x));
+    });
+    if (!ids.size) return null;
+    const extend = (coords) => {
+      if (typeof coords[0] === 'number') { b?.extend(coords); return; }
+      coords.forEach(extend);
+    };
+    let b = null;
+    for (const f of worldGeoJSON.features) {
+      if (!ids.has(f.properties?.id)) continue;
+      if (!b) b = new maplibregl.LngLatBounds();
+      extend(f.geometry?.coordinates || []);
+    }
+    return b;
+  }
+
+  /**
+   * 数据更新后按 id 把对象**重新取一次**。
+   *
+   * ⚠️ 不能一直攥着打开那一刻的引用：轮询发现 places.json 变了就整份重新
+   *    `normalize()` —— places / trips 全部换成**新对象**，旧引用从此与数据脱钩。
+   *    弹窗开着时改了 places.json，界面会永远停在旧内容上（看着像"保存没生效"）。
+   */
+  function resolveRef(view) {
+    const id = view.ref?.id;
+    if (!id) return view.ref;
+    const pool = view.kind === 'trip' ? (getTrips?.() || []) : (getPlaces() || []);
+    return pool.find((x) => x.id === id) || view.ref;
+  }
+
+  /** 打开后的公共挂载流程。地点与行程只有"上半部地图怎么画"不同。 */
+  function mount(view) {
+    current = view;
+    stopFilter = null;                        // 新内容没有"上一次选中的站"
+
+    // 记录关闭后要归还焦点的元素
+    if (modal.hidden) lastFocus = document.activeElement;
+
+    titleEl.textContent = view.name;
+    dotEl.style.background = view.color;
+    subEl.textContent = view.sub;
+    badgeEl.textContent = view.badge;
+
+    renderTabs(view);
+    renderContent(view);
+
+    modal.hidden = false;
+    modal.classList.remove('is-closing');
+    document.body.classList.add('is-modal-open');
+
+    // 每次打开都把滚动与地图高度复位
+    bodyEl.scrollTop = 0;
+    measureMaxH();
+    panel.style.setProperty('--mw-h', `${scrollMaxH}px`);
+    panel.style.setProperty('--mw-p', '0');
+    panel.style.setProperty('--mw-blur', '0px');
+    panel.classList.remove('is-scrolled');
+
+    // 小地图在弹窗显示后再初始化，避免容器尺寸为 0 时 MapLibre 算出错误的画布尺寸
+    requestAnimationFrame(() => {
+      ensureDetailMap();
+      syncDetailStyle();
+      applyVisitedCountries(detailMap, getVisited(), DETAIL_FILL);   // 数据可能已更新，重新上色
+
+      if (view.kind === 'trip') {
+        /* 行程：上半部只画路线。
+           先把地点图钉清掉，否则「京都 → 东京」这种短程路线会被周围一串邻居图钉淹没；
+           routeAnim 自己也会清上一次的图层与站点标记。
+           把站点所在国家的包围盒一起交给取景，让"走一遍"带上地理上下文。 */
+        clearDetailMarkers();
+        routeAnim.play(view.places, { contextBounds: contextBoundsFor(view.places) });
+      } else {
+        routeAnim.stop();                 // 从行程切到地点：动画与折线一并收掉
+        renderDetailMarkers(view.ref);
+      }
+      detailMap.resize();
+    });
+
+    closeBtn.focus();
+  }
+
+  /** 打开一个地点（地图显示图钉与附近足迹，**不**放路线动画） */
+  function open(place) {
+    if (!place) return;
+    mount(placeView(place));
+  }
+
+  /** 打开一次行程（地图播放"走一遍"，内容是各地点媒体的汇总） */
+  function openTrip(trip) {
+    if (!trip || !trip.places?.length) return;
+    mount(tripView(trip));
+  }
+
+  function close() {
+    if (modal.hidden) return;
+    closeLightbox();
+    stopFilter = null;                    // 下次打开不残留上一次的站点筛选
+    routeAnim?.stop();                    // 先把动画停掉，别让它在退场动画期间继续跑
+    modal.classList.add('is-closing');
+    const done = () => {
+      modal.hidden = true;
+      modal.classList.remove('is-closing');
+      document.body.classList.remove('is-modal-open');
+      current = null;
+      if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+    };
+    // 等退场动画结束（尊重 prefers-reduced-motion）
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) done();
+    else setTimeout(done, 240);
+  }
+
+  /* =========================================================
+   * 事件绑定
+   * ========================================================= */
+  bodyEl.addEventListener('scroll', onScroll, { passive: true });
+  closeBtn.addEventListener('click', close);
+
+  modal.addEventListener('click', (e) => {
+    if (isCloseTarget(e.target)) close();
+  });
+
+  lbPrev.addEventListener('click', (e) => { e.stopPropagation(); stepLightbox(-1); });
+  lbNext.addEventListener('click', (e) => { e.stopPropagation(); stepLightbox(1); });
+  lightbox.addEventListener('click', (e) => {
+    if (isCloseTarget(e.target)) closeLightbox();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (lightbox.hidden === false) {
+      if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stepLightbox(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1); }
+      return;
+    }
+    if (!modal.hidden && e.key === 'Escape') { e.preventDefault(); close(); }
+  });
+
+  window.addEventListener('resize', () => {
+    if (modal.hidden) return;
+    measureMaxH();
+    syncScrollEffect();
+  });
+
+  /* 详情地图在窗口尺寸变化时同步 */
+  try {
+    window.addEventListener('resize', () => {
+      try { detailMap?.resize(); } catch (err) { warnOnce('detail-resize', err.message); }
+    });
+  } catch (_) { /* 忽略 */ }
+
+  return {
+    open,
+    openTrip,
+    close,
+    isOpen: () => !modal.hidden,
+    get current() { return current?.ref || null; },
+    /** 调试与验收用：当前是不是"行程模式"，以及这条路线上的站点顺序 */
+    getTrip: () => (current?.kind === 'trip' ? current.ref : null),
+    getStops: () => (current?.kind === 'trip' ? (routeAnim?.getStops() || []) : []),
+    /** 调试与验收用：折线此刻画到哪儿了（点数 / 末端坐标 / 当前段） */
+    getRouteProgress: () => (current?.kind === 'trip' ? (routeAnim?.progress() || null) : null),
+    /** 调试与验收用：当前点选的站点（place id，null = 没选） */
+    getStopFilter: () => stopFilter,
+    /** 验收用：直接切换站点筛选（等同点打点 / 点空白） */
+    selectStop: (id) => applyStopFilter(id),
+    /**
+     * 数据变化后刷新弹窗（由 main.js 的 renderAll 调用，10 秒一轮且只在
+     * places.json 真的变了时才走到）。标题 / 副标题 / 徽标 / 媒体全部重建。
+     *
+     * ⚠️ 行程模式下**不重播**"走一遍"动画：那会让用户每 10 秒被迫从头看一遍。
+     *    只有站点集合真的变了（往行程里加了地点）才重走。
+     */
+    refresh() {
+      if (!current || modal.hidden) return;
+      const kind = current.kind;
+      const ref = resolveRef(current);
+      const stopsBefore = kind === 'trip' ? (routeAnim?.getStops() || []).join('|') : '';
+
+      current = kind === 'trip' ? tripView(ref) : placeView(ref);
+
+      /* 数据更新后，原来选中的站可能已经不在行程里了 —— 先校验再渲染 */
+      if (kind === 'trip' && stopFilter && !current.stops.some((s) => s.id === stopFilter)) {
+        stopFilter = null;
+      }
+
+      titleEl.textContent = current.name;
+      subEl.textContent = current.sub;
+      badgeEl.textContent = current.badge;
+      rerenderContent();                       // 含 Tab 计数与筛选徽标
+
+      if (detailMap) applyVisitedCountries(detailMap, getVisited(), DETAIL_FILL);
+
+      if (kind === 'trip') {
+        const want = current.places.map((p) => p.name).join('|');
+        if (want && want !== stopsBefore) {
+          /* 站点集合真的变了 → 重播；重播会重建标记，选中态要在 play 之后补
+             （play 内部会清 selIdx，而标记可能在样式就绪后才重建）。 */
+          routeAnim.play(current.places, { contextBounds: contextBoundsFor(current.places) });
+          if (stopFilter != null) routeAnim.highlight(routeAnim.getStopIds().indexOf(stopFilter));
+        }
+      } else {
+        renderDetailMarkers(ref);      // 邻居图钉可能多了/少了
+      }
+    },
+  };
+}

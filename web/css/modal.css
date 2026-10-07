@@ -1,0 +1,400 @@
+/* =========================================================
+   modal.css · 图钉详情弹窗 + 全屏预览
+   ---------------------------------------------------------
+   结构：上半 = 该地区局部放大地图（独立 MapLibre 实例，带图钉）
+        下半 = 该地点关联的多媒体资料（图片 / 视频 / 文字）
+   核心动效：向下滚动内容时，顶部地图平滑收缩并带轻微模糊（ScrollEdgeEffect）
+   ========================================================= */
+
+/* ================= 遮罩与面板 ================= */
+.modal {
+  position: fixed; inset: 0;
+  z-index: var(--z-modal);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+
+.modal__mask {
+  position: absolute; inset: 0;
+  background: rgba(40, 35, 28, .38);
+  backdrop-filter: blur(5px) saturate(120%);
+  -webkit-backdrop-filter: blur(5px) saturate(120%);
+  animation: tm-fade var(--dur) var(--ease) both;
+}
+@keyframes tm-fade { from { opacity: 0; } }
+
+.modal__panel {
+  position: relative;
+  width: min(880px, 100%);
+  height: min(770px, 88vh);
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-4);
+  overflow: hidden;
+  animation: tm-rise var(--dur-slow) var(--ease-out) both;
+
+  /* 由 JS 动态驱动：
+     --mw-max  地图最大高度（= 内容区顶部预留高度）
+     --mw-h    地图当前高度（随滚动收缩）
+     --mw-blur 当前模糊半径
+     --mw-p    滚动进度 0~1 */
+  --mw-max: 320px;
+  --mw-h: 320px;
+  --mw-blur: 0px;
+  --mw-p: 0;
+}
+@keyframes tm-rise {
+  from { opacity: 0; transform: translateY(18px) scale(.985); }
+}
+.modal.is-closing .modal__panel { animation: tm-sink var(--dur) var(--ease) both; }
+.modal.is-closing .modal__mask { animation: tm-fade-out var(--dur) var(--ease) both; }
+@keyframes tm-sink { to { opacity: 0; transform: translateY(12px) scale(.99); } }
+@keyframes tm-fade-out { to { opacity: 0; } }
+
+.modal__close {
+  position: absolute; right: 14px; top: 14px; z-index: 6;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border: 1px solid rgba(255, 255, 255, .75);
+  border-radius: 50%;
+  background: var(--glass-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: var(--sh-3);
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.modal__close:hover { transform: rotate(90deg); background: #fff; }
+
+/* ================= 上半：局部放大地图 =================
+   关键：地图与内容区是"绝对定位 + 覆盖"关系，不是 flex 两段。
+   若用 flex（地图高度变化 → 内容区可视高度变化 → 可滚动范围变化），
+   浏览器会在收缩过程中钳制 scrollTop，触发新的滚动事件，
+   与新高度互相喂给，形成 131px ↔ 206px 的高频振荡，地图最终停在未加载状态。
+   改成绝对定位后：内容区高度恒等于面板高度、内容总高恒定，
+   可滚动范围在整个收缩过程中不变，彻底切断这个反馈回路。
+
+   另外，地图收缩量刻意与滚动量 1:1（见 JS 的 syncScrollEffect），
+   于是内容区顶部预留高度减掉滚动量，正好等于当前地图高度，
+   标题始终严丝合缝贴在地图下沿，不会出现空档。 */
+.modal__mapwrap {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: var(--mw-h);
+  z-index: 3;
+  overflow: hidden;
+  background: var(--map-ocean);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* ⚠️ 画布尺寸**恒定**为 --mw-max，收缩的是外面那层 .modal__mapwrap（它 overflow:hidden）。
+   2026-10-06 改这个结构是为了修"滚动时地图闪白"：
+     · 旧结构里 .modal__map 跟着 wrap 一起变矮 → 容器尺寸逐帧变 → 必须 resize；
+     · 实测**每 resize 一次**，合成器就抓到一帧"空画布"（录屏里是 +18 亮度的尖峰），
+       即使用 28px 一档的节流也还是每滚一段闪一次（关掉模糊层的对照组一样闪，
+       证明与 backdrop-filter 无关，只与 resize 有关）。
+   现在容器尺寸全程不变 → 滚动期间一次 resize 都不需要 → 零闪。
+   居中裁切还顺带保证：无论收缩到多矮，可见区始终以地图**中心**为中心，
+   路线与图钉永远在可见区里，不会像"顶部对齐"那样被裁掉。 */
+.modal__map {
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: var(--mw-max, 320px);
+  transform: translateY(-50%);
+}
+
+/* 被裁掉的顶部量 = (--mw-max − --mw-h)/2，把底图署名下移同样的量，
+   收缩后它仍然落在可见区内（署名跟着地图一起消失会让 OpenFreeMap 的署名要求落空）。 */
+.modal__map .maplibregl-ctrl-attrib {
+  margin-top: calc((var(--mw-max, 320px) - var(--mw-h, var(--mw-max, 320px))) / 2);
+}
+
+/* 轻微模糊层：随滚动进度增强，并用渐变蒙版让"越靠近内容越糊"。
+   为什么加蒙版而不是整块一起糊：整块等量模糊会把地图糊成一片奶白，
+   反而看不清；蒙版让顶部保持清晰、底部融进内容，才是 ScrollEdgeEffect 的观感。 */
+.modal__mapblur {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(var(--mw-blur));
+  -webkit-backdrop-filter: blur(var(--mw-blur));
+  -webkit-mask-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, .18) 42%, rgba(0, 0, 0, .7) 76%, rgba(0, 0, 0, 1) 100%);
+  mask-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, .18) 42%, rgba(0, 0, 0, .7) 76%, rgba(0, 0, 0, 1) 100%);
+}
+
+/* 底部渐隐，让地图与内容平滑衔接，而非硬边 */
+.modal__mapedge {
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 58px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, .92));
+}
+.modal.is-scrolled .modal__mapedge { height: 34px; }
+
+.modal__mapbadge {
+  position: absolute; left: 16px; bottom: 14px;
+  z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: calc(100% - 80px);
+  padding: 5px 11px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: var(--r-pill);
+  box-shadow: var(--sh-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: calc(1 - var(--mw-p));
+  transition: opacity var(--dur) var(--ease);
+}
+
+/* ================= 下半：多媒体内容 =================
+   内容区"整个覆盖"在面板上（inset:0），地图以更高的 z-index 压在它顶部。
+   首个子元素 .modal__pad 是一块"固定高度"的占位，高度恒为 --mw-max，
+   于是内容总高 = --mw-max + 内容高，在整段收缩动画里始终不变，
+   可滚动范围也就恒定不变 —— 这是打断振荡回路的关键。
+
+   为什么地图收缩必须与滚动量严格 1:1（见 JS syncScrollEffect）：
+     · 内容布局偏移恒为 --mw-max，向下滚动 s 后标题上移到 (--mw-max - s)；
+     · 地图高度 h 也正好等于 (--mw-max - s)；
+     · 两者相等 → 标题严丝合缝贴住地图下沿，全程不需要任何补间位移。 */
+.modal__body {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 顶部占位：高度固定为地图最大高度，绝不随滚动变化 */
+.modal__pad {
+  height: var(--mw-max);
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.modal__head {
+  display: flex; align-items: center; gap: 11px;
+  padding: 16px 22px 13px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-soft);
+}
+.modal__head .typeDot { width: 14px; height: 14px; }
+.modal__meta { min-width: 0; }
+.modal__title { font-size: var(--fs-xl); font-weight: 700; }
+.modal__sub { font-size: var(--fs-md); color: var(--ink-2); margin-top: 1px; }
+
+/* 吸顶位置跟随地图当前高度：收缩阶段标题紧随地图下沿，
+   地图触底（132px）后标题继续上滚、Tab 栏就钉在地图下沿。 */
+.modal__tabs {
+  position: sticky; top: var(--mw-h); z-index: 2;
+  display: flex; align-items: center; gap: 2px;
+  padding: 2px 22px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+}
+.modal__tabs .tabs__btn { padding: 10px 12px; font-size: var(--fs-base); }
+.modal__tabs .tabs__btn b { font-weight: 600; color: inherit; opacity: .6; margin-left: 3px; }
+
+/* 站点筛选徽标（行程模式里点了地图上的打点后出现）。
+   挤在 Tab 行右端跟着一起吸顶：滚到多低都看得见"现在只看哪一站"，
+   × 是"点地图空白恢复"之外的第二条出口。 */
+.tabs__filter {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-size: var(--fs-sm); font-weight: 600; white-space: nowrap;
+}
+.tabs__filter-name { max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+.tabs__filter button {
+  width: 18px; height: 18px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: none;
+  color: inherit; cursor: pointer;
+}
+.tabs__filter button:hover { background: rgba(var(--shadow-c), .12); }
+
+.modal__content { padding: 18px 22px 26px; }
+.modal__section + .modal__section { margin-top: 24px; }
+
+/* 大图网格（图片 / 视频） */
+.mgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.mgrid__cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 0; padding: 0;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: pointer;
+  box-shadow: var(--sh-1);
+}
+.mgrid__cell img,
+.mgrid__cell video { width: 100%; height: 100%; object-fit: cover; }
+.mgrid__cell img { transition: transform var(--dur-slow) var(--ease-out); }
+.mgrid__cell:hover img { transform: scale(1.07); }
+.mgrid__cell--wide { grid-column: span 2; aspect-ratio: 2 / 1; }
+.mgrid__cell--video::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(20, 24, 30, .18), rgba(20, 24, 30, .34));
+}
+.mgrid__play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 1;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .9);
+  color: var(--ink);
+  box-shadow: var(--sh-3);
+}
+.mgrid__play .ico { fill: currentColor; stroke-width: 1.2; }
+.mgrid__count {
+  position: absolute; right: 7px; bottom: 7px; z-index: 2;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(20, 24, 30, .5);
+  backdrop-filter: blur(6px);
+  color: #fff; font-size: var(--fs-xs);
+}
+
+/* 文字卡片 */
+.notecard {
+  padding: 15px 17px;
+  background: var(--surface-2);
+  border-left: 3px solid var(--primary-soft);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  line-height: 1.75;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+.notecard__title { font-size: var(--fs-base); font-weight: 600; color: var(--ink); margin-bottom: 5px; }
+
+/* 迷你信息条 */
+.metarow {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.metatag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.metatag b { color: var(--ink); font-weight: 600; }
+/* 色板小方块。尺寸/圆角放这里，颜色由 JS 内联写 background（每格不同）。
+   ⚠️ 它曾经写成 <b style="…"> 且漏了闭合标签，导致后面的节点全被吞进这个
+   inline-block（11px 宽）里，"说明"整段被压成一字一行 —— 改这里时确认标签是闭合的。 */
+.metatag__swatch {
+  display: inline-block;
+  width: 11px; height: 11px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06);
+}
+
+/* ================= 全屏预览（仿朋友圈点开图片） ================= */
+.lightbox {
+  position: fixed; inset: 0;
+  z-index: var(--z-lightbox);
+  background: rgba(14, 16, 20, .95);
+  display: flex; align-items: center; justify-content: center;
+  animation: tm-fade var(--dur) var(--ease) both;
+}
+.lightbox.is-closing { animation: tm-fade-out var(--dur) var(--ease) both; }
+.lightbox__mask { position: absolute; inset: 0; }
+
+/* 舞台铺满整屏（图片在其中居中），但它是 z-index:1，会把下面的遮罩整个盖住 ——
+   那样"点深色背景关闭"就永远点不到遮罩。所以让舞台本身不接收指针事件，
+   只把事件还给图片/视频；点空白处自然落到遮罩上。 */
+.lightbox__stage {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+  padding: 44px 68px 72px;
+  margin: 0;
+}
+.lightbox__stage img,
+.lightbox__stage video {
+  pointer-events: auto;
+  max-width: 100%; max-height: 100%;
+  border-radius: 6px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  object-fit: contain;
+  animation: tm-zoom-in var(--dur-slow) var(--ease-out) both;
+}
+@keyframes tm-zoom-in {
+  from { opacity: 0; transform: scale(.88); }
+}
+.lightbox__stage.is-switching img,
+.lightbox__stage.is-switching video { animation: tm-fade var(--dur-fast) var(--ease) both; }
+
+.lightbox__close {
+  position: absolute; right: 18px; top: 18px; z-index: 3;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .14);
+  color: #fff; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.lightbox__close:hover { background: rgba(255, 255, 255, .26); transform: rotate(90deg); }
+
+.lightbox__nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  z-index: 3;
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .12);
+  color: #fff; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
+}
+.lightbox__nav:hover { background: rgba(255, 255, 255, .24); }
+.lightbox__nav[disabled] { opacity: .25; cursor: default; }
+.lightbox__nav--prev { left: 16px; }
+.lightbox__nav--next { right: 16px; }
+.lightbox__nav .ico { width: 22px; height: 22px; }
+
+.lightbox__bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  padding: 16px 24px 20px;
+  color: rgba(255, 255, 255, .9);
+  font-size: var(--fs-md);
+  text-align: center;
+  background: linear-gradient(to top, rgba(0, 0, 0, .5), transparent);
+}
+.lightbox__counter { font-variant-numeric: tabular-nums; opacity: .75; flex: 0 0 auto; }
+.lightbox__caption { max-width: 70%; }
+
+/* ================= 响应式 ================= */
+@media (max-width: 900px) {
+  .modal { padding: 0; }
+  .modal__panel { width: 100%; height: 100%; border-radius: 0; }
+  .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lightbox__stage { padding: 40px 52px 76px; }
+}
+@media (max-width: 620px) {
+  .modal__content { padding: 14px 16px 22px; }
+  .modal__head { padding: 14px 16px 12px; }
+  .modal__tabs { padding: 2px 16px 0; }
+  .modal__mapbadge { display: none; }
+  .lightbox__nav { width: 38px; height: 38px; }
+}
+/* 矮屏：面板更高，地图最大高度由 JS 按 clientHeight 计算，这里不再写死 --mw-* */
+@media (max-height: 620px) {
+  .modal__panel { height: 96vh; }
+}

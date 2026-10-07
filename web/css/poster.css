@@ -1,0 +1,157 @@
+/* =========================================================
+   poster.css · 地图页「旅途海报」模块
+   ---------------------------------------------------------
+   多张同时陈列 —— 尺寸不等 —— 各自随机翻牌替换 —— 视频只取首帧当封面。
+   结构见 index.html 的 #tm-card-poster，逻辑见 js/poster.js。
+
+   ⚠️ 两条不能动的约定（都是实测踩出来的）：
+     1) 格子比例必须温和（约 1:1 ~ 2:1）。
+        首版用等宽三列 + 2×1 横条，横条算出来是 406×100 ≈ 4:1，
+        4:3 的照片塞进去只剩中间一条（原图只保留 ~33%），用户直接反馈
+        「图片没有完整显示出来」。现在靠**不等宽列（1.6fr）+ 抬高行高**
+        把每格压回 1.05~2.0，实测保留率 78%~96%（tm-poster-state.mjs 可复算）。
+        结论：**「大小不一致」不等于「比例极端」** —— 大小差用 span 拉，
+        比例必须留在照片能吃的区间里。
+     2) 整墙用 aspect-ratio 锁比例、行高用 fr。
+        行高写 px 的话，格子会随屏宽变形：屏幕越宽，2×1 横条越扁，
+        又退回 4:1。fr + aspect-ratio 能让行高跟着宽度等比缩放，
+        任何屏宽下每格的"长宽比"都保持不变。
+   ========================================================= */
+
+/* 卡脚只有一个「换一批」按钮，右对齐（不写实现性提示文案给访客看） */
+.card--poster .card__foot { justify-content: flex-end; }
+
+/* 卡的主体要能跟着卡片一起长高（两列等高靠 .grid--main 的 align-items:stretch），
+   否则海报墙只吃自己的内容高度，卡片底边就和左列对不齐。 */
+.card--poster .card__body { display: flex; flex-direction: column; min-height: 0; }
+
+.posterwall {
+  display: grid;
+  /* 4 列 × 4 行。为什么是 4 列：墙的高度被左列拉满后，行高是"被决定的"，
+     3 列时 2 列宽的横块会算到 2.9:1（4:3 照片只剩 46%）；拆成 4 列后列变窄，
+     同样的横块回落到 ≈2.0:1。列数不是审美选择，是比例算出来的。 */
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  /* 两列布局（>1200px）时，`.grid--main` 用 align-items:stretch 把海报卡拉到和左列一样高，
+     这里 height:100% 把多出来的高度全吃掉 → 两列底边对齐（用户明确要求"模块之间保持对齐"）。
+     单列布局（≤1200px）时父高是 auto，height:100% 退化成 auto，改由 aspect-ratio 定高。
+     ⚠️ 两条规则互补，缺一个都会在某一档宽度上变形：
+        · 只有 height:100% → 单列时墙被压成扁条（2×1 横块会到 3.2:1）；
+        · 只有 aspect-ratio → 两列时墙不吃满卡片高度，卡片底边和左列对不齐。 */
+  height: 100%;
+  aspect-ratio: 1.05;
+  /* ⚠️ width:100% 不能省：`.card--poster .card__body` 是 column flex，
+     而 `margin-inline:auto` 会**取消交叉轴的 stretch**，墙就只剩 fit-content 宽度
+     （实测塌成 36px —— 恰好是三条 gap）。有了确定宽度，aspect-ratio 才反推得出高度。 */
+  width: 100%;
+  max-width: 860px;              /* 超宽屏/单列时不要让墙无限变高 */
+  /* margin:auto 而不是 margin-inline:auto：墙被高度上限挡住时，多出来的空间
+     在卡内上下平分，看着像对称留白；只写 inline 的话留白全堆在底部。 */
+  margin: auto;
+}
+
+/* 十块尺寸各不相同：一块 2×2 大图 + 六个 1×1 小方 + 三个 2×1 横块。
+   ⚠️ 横块一律跨 **第 2~3 列**，不要跨 1~2：第 1 列是 1.2fr（更宽），
+      跨 1~2 会算到 2.28:1（实测），跨 2~3 是 2.07:1。 */
+.pw--a { grid-column: 1 / 3; grid-row: 1 / 3; }   /* 2×2 大图 */
+.pw--b { grid-column: 3 / 4; grid-row: 1 / 2; }
+.pw--c { grid-column: 4 / 5; grid-row: 1 / 2; }
+.pw--d { grid-column: 3 / 5; grid-row: 2 / 3; }   /* 横块 */
+.pw--e { grid-column: 1 / 2; grid-row: 3 / 4; }
+.pw--f { grid-column: 2 / 4; grid-row: 3 / 4; }   /* 横块 */
+.pw--g { grid-column: 4 / 5; grid-row: 3 / 4; }
+.pw--h { grid-column: 1 / 2; grid-row: 4 / 5; }
+.pw--i { grid-column: 2 / 4; grid-row: 4 / 5; }   /* 横块 */
+.pw--j { grid-column: 4 / 5; grid-row: 4 / 5; }
+
+.pw {
+  position: relative;
+  min-width: 0;
+  perspective: 1100px;
+  cursor: pointer;
+}
+
+/* 翻牌：两面卡 + 累加 rotateY。
+   为什么不是"转到 90° 再换内容"——那样换完还得靠 reflow 把卡片瞬移回 -90°，
+   视频元素在瞬移那一下会重新解码、闪一下。双面卡把新内容写进**当前看不见的那一面**
+   再转 180°，全程没有"空白面"。 */
+.pw__in {
+  position: relative;
+  width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform var(--dur-flip, .58s) var(--ease);
+  will-change: transform;
+}
+
+.pw__face {
+  position: absolute; inset: 0;
+  border-radius: var(--r-sm, 10px);
+  overflow: hidden;
+  background: var(--surface-3);
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5);
+}
+.pw__face + .pw__face { transform: rotateY(180deg); }
+
+.pw__media {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity var(--dur-fast, .2s) var(--ease);
+}
+.pw__media.ok { opacity: 1; }      /* 加载完再淡入，慢网时不露底色 */
+
+.pw__scrim {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(28, 20, 12, .52), rgba(28, 20, 12, 0) 56%);
+}
+
+.pw__meta {
+  position: absolute; left: 9px; right: 9px; bottom: 7px;
+  color: #fff;
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  display: flex; align-items: baseline; gap: 6px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none;
+}
+.pw__meta b { font-weight: 600; }
+.pw__meta span { color: rgba(255, 255, 255, .78); font-size: var(--fs-xs); }
+
+/* 视频角标：视频不播放，只取首帧，用角标区分 */
+.pw__play {
+  position: absolute; right: 8px; top: 8px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(24, 18, 12, .42);
+  display: grid; place-items: center;
+  pointer-events: none;
+}
+.pw__play::before {
+  content: ""; width: 0; height: 0; margin-left: 2px;
+  border-left: 7px solid #fff;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+/* ⚠️ 单列（≤1200px）：卡片不再被左列拉高，父高是 auto，
+   此时 `height:100%` 会退化成 0 —— 实测整面墙塌成 36×34（只剩三条 gap 的宽度），
+   十个格子全是 0×0。这条覆盖把高度交回 aspect-ratio（由宽度反推），必须留着。 */
+@media (max-width: 1200px) {
+  .posterwall { height: auto; }
+}
+
+/* 空态：还没有任何照片/视频时占位（文字由 js/poster.js 写入） */
+.posterwall--empty {
+  display: grid; place-items: center;
+  aspect-ratio: auto; min-height: 160px;
+  color: var(--ink-3); font-size: var(--fs-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw__in { transition: none; }
+  .pw__media { transition: none; }
+}

@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TravelMap · 我的旅行足迹地图</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237C9CC3' d='M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z'/%3E%3C/svg%3E" />
+
+<!-- MapLibre GL JS v5（开源，无需 token）。mercator 平面投影 + OpenFreeMap 矢量瓦片。 -->
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+
+<!-- 样式加载顺序很重要：layout.css 里的响应式媒体查询必须排在 components.css 之后。
+     媒体查询本身不提升优先级，若 layout 在 components 之前，窄屏下 `.usercard{display:none}`
+     会被 components 的 `.usercard{display:flex}` 覆盖（同优先级、后者胜），侧栏就会挤成竖排文字。 -->
+<link rel="stylesheet" href="./css/tokens.css" />
+<link rel="stylesheet" href="./css/base.css" />
+<link rel="stylesheet" href="./css/components.css" />
+<link rel="stylesheet" href="./css/poster.css" />
+<link rel="stylesheet" href="./css/layout.css" />
+<link rel="stylesheet" href="./css/modal.css" />
+<link rel="stylesheet" href="./css/app.css" />
+
+<script>
+/* 以 file:// 直接打开时，浏览器会拦截 fetch 与 ES Module，控制台会刷一片报错。
+   这里提前拦截，给出明确指引，避免"打开即满屏报错"。 */
+if (location.protocol === 'file:') {
+  document.documentElement.className = 'is-file-protocol';
+}
+</script>
+</head>
+<body>
+
+<!-- ===== SVG 图标集（内联 sprite，零外部依赖） ===== -->
+<svg class="svg-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <g id="i-map"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15"/><path d="M15 6v15"/></g>
+    <g id="i-heart"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></g>
+    <g id="i-calendar"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></g>
+    <g id="i-star"><path d="M12 2.6l2.94 5.96 6.58.96-4.76 4.64 1.12 6.55L12 17.62 6.12 20.7l1.12-6.55L2.48 9.52l6.58-.96z"/></g>
+    <g id="i-chart"><path d="M3 3v18h18"/><path d="M8 17V9M13 17V5M18 17v-6"/></g>
+    <g id="i-gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>
+    <g id="i-share"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/></g>
+    <g id="i-search"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></g>
+    <g id="i-filter"><path d="M21.5 3.5h-19l7.6 9v6.2l3.8 1.9v-8.1z"/></g>
+    <g id="i-plus"><path d="M5 12h14M12 5v14"/></g>
+    <g id="i-minus"><path d="M5 12h14"/></g>
+    <g id="i-target"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></g>
+    <g id="i-image"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.8" cy="8.8" r="1.8"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></g>
+    <g id="i-video"><rect x="2" y="6" width="14" height="12" rx="3"/><path d="m22 8-6 4 6 4z"/></g>
+    <g id="i-note"><path d="M14 2H7a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V8z"/><path d="M14 2v6h6M16 13H9M16 17H9M10 9H9"/></g>
+    <g id="i-pin"><path d="M20 10.5c0 6-8 11.5-8 11.5s-8-5.5-8-11.5a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10.3" r="2.8"/></g>
+    <g id="i-close"><path d="M18 6 6 18M6 6l12 12"/></g>
+    <g id="i-left"><path d="m15 18-6-6 6-6"/></g>
+    <g id="i-right"><path d="m9 18 6-6-6-6"/></g>
+    <g id="i-chevron"><path d="m6 9 6 6 6-6"/></g>
+    <!-- 脚印：路线动画里走在最前面的那枚光标（js/route.js 的 .tm-walker）。
+         脚掌 + 两枚脚趾，14px 下能看清是"脚印"而不是一团黑点。 -->
+    <g id="i-foot"><path d="M12.7 2.6c2.1 0 3.4 1.6 3.4 3.7 0 1.4-.6 2.3-.6 3.5 0 1.5 1.1 2.6 1.1 4.6 0 2.4-1.7 4.1-3.9 4.1s-3.9-1.7-3.9-4.1c0-2 1-3.1 1-4.6 0-1.2-.6-2.1-.6-3.5 0-2.1 1.4-3.7 3.5-3.7Z"/><circle cx="6.6" cy="8.5" r="1.7"/><circle cx="5.3" cy="12.4" r="1.1"/></g>
+    <g id="i-more"><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/><circle cx="5" cy="12" r="1.4"/></g>
+    <g id="i-arrow"><path d="M5 12h14M12 5l7 7-7 7"/></g>
+    <g id="i-globe"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18"/><path d="M12 2.8a15 15 0 0 1 0 18.4 15 15 0 0 1 0-18.4z"/></g>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <!-- ================= 侧栏 ================= -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <!-- 窄屏（≤1040px，侧栏仅 68px）时用它替代文字 logo，避免手写体标题溢出侧栏 -->
+      <svg class="ico brand__mark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pin"/></svg>
+      <h1 class="brand__title">My Travel Map</h1>
+      <p class="brand__sub">记录世界，收藏回忆</p>
+    </div>
+
+    <nav class="nav" id="tm-nav" aria-label="主导航">
+      <!-- 68px 图标导轨（981–1040px）下图标无文字，靠 data-label 做悬停提示；
+           属性名必须叫 data-label，且**六个按钮都要有**（缺了会渲染成一条空深色块）。
+
+           「足迹」= 唯一的行程入口（2026-10-05 合并「足迹」与「行程」两个模块）：
+           图标用日历 —— 时间线是按「年 → 行程 → 地点」排的，日历比路线更贴合。 -->
+      <button class="nav__item is-active" data-view="map" data-label="地图">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-map"/></svg><span>地图</span>
+      </button>
+      <button class="nav__item" data-view="footprints" data-label="足迹">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-calendar"/></svg><span>足迹</span>
+      </button>
+
+      <!-- 「记录」= 所有地点下挂的照片 / 视频 / 笔记（2026-10-06 由「收藏」改名）。
+           改名的原因：模块里没有「收藏」这个动作，也不是用户主动收藏的清单，
+           它只是把 38 个地点的 media 摊平成一条媒体流 —— 名字该描述内容本体，而不是暗示一种操作。
+           分类筛选只保留视图顶部的芯片，侧栏不再挂三个子项（同一份 collMediaFilter 的两个入口砍掉一个）。 -->
+      <button class="nav__item" data-view="collections" data-label="记录">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-image"/></svg><span>记录</span>
+      </button>
+
+      <button class="nav__item" data-view="wishlist" data-label="愿望清单">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-star"/></svg><span>愿望清单</span>
+      </button>
+      <button class="nav__item" data-view="stats" data-label="统计">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-chart"/></svg><span>统计</span>
+      </button>
+      <button class="nav__item" data-view="settings" data-label="设置">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-gear"/></svg><span>设置</span>
+      </button>
+    </nav>
+
+    <div class="sidebar__foot">
+      <div class="usercard">
+        <div class="usercard__head">
+          <div class="avatar" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><defs><linearGradient id="avaG" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#BFD3E4"/><stop offset="1" stop-color="#8FAAC6"/></linearGradient></defs>
+              <rect width="48" height="48" fill="url(#avaG)"/>
+              <circle cx="24" cy="19" r="7.4" fill="#FBF6F0" opacity=".9"/>
+              <path d="M9 48c1.6-9.6 8-15 15-15s13.4 5.4 15 15z" fill="#FBF6F0" opacity=".9"/>
+            </svg>
+          </div>
+          <p class="usercard__hi">Hi, Coral</p>
+        </div>
+        <p class="usercard__line">已点亮 <b id="tm-user-countries">0</b> 个国家/地区</p>
+        <p class="usercard__line">探索世界的 <b id="tm-user-pct">0%</b></p>
+        <div class="progress"><i id="tm-user-bar" style="width:0%"></i></div>
+        <button class="link" data-view="footprints">查看足迹时间线
+          <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+        </button>
+      </div>
+
+      <svg class="sidebar__art" viewBox="0 0 200 96" aria-hidden="true">
+        <path d="M0 78h200" stroke="#DDD3C4" stroke-width="1"/>
+        <path d="M22 78 58 34l20 22 14-15 30 37z" fill="#E8E0D2" stroke="#C9BFAC" stroke-width=".9" stroke-linejoin="round"/>
+        <path d="M58 34 44 52h28z" fill="#F3EEE5"/>
+        <path d="M118 78 148 46l26 32z" fill="#E2DACB" stroke="#C9BFAC" stroke-width=".9" stroke-linejoin="round"/>
+        <path d="M148 46 140 57h16z" fill="#F3EEE5"/>
+        <g stroke="#B7AC97" stroke-width=".9" fill="#DCD2BF">
+          <path d="M14 78V62l-9 8zM14 78V62l9 8zM14 64V52l-6 6zM14 64V52l6 6z"/>
+          <path d="M178 78V56l-11 9zM178 78V56l11 9zM178 60V44l-7 7zM178 60V44l7 7z"/>
+        </g>
+        <g fill="none" stroke="#CFC4B0" stroke-width=".9">
+          <ellipse cx="100" cy="24" rx="18" ry="7"/><ellipse cx="100" cy="24" rx="11" ry="4"/>
+          <path d="M170 16c4 0 6 3 6 6"/><path d="M34 18c3 0 5 2 5 5"/>
+        </g>
+      </svg>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <main class="main">
+    <div class="main__scroll" id="tm-scroll">
+
+      <!-- 页头（仅地图视图完整展示，其余视图复用写作区） -->
+      <header class="topbar">
+        <div class="topbar__left">
+          <h2 class="topbar__title" id="tm-view-title">世界地图</h2>
+          <p class="topbar__sub" id="tm-view-sub">点亮你去过的地方</p>
+        </div>
+        <div class="topbar__right">
+          <button class="btn btn--ghost" id="tm-share">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-share"/></svg>分享地图
+          </button>
+          <div class="searchbar">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+            <input id="tm-search" type="search" placeholder="搜索地点 / 国家" autocomplete="off" aria-label="搜索地点" />
+          </div>
+          <button class="btn btn--icon" id="tm-style-toggle" title="切换底图样式" aria-label="切换底图样式">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-globe"/></svg>
+          </button>
+          <button class="btn btn--primary" id="tm-add">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>记录新足迹
+          </button>
+          <button class="btn btn--ghost" id="tm-logout" hidden>
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>退出
+          </button>
+        </div>
+      </header>
+
+      <!-- ============ 视图：地图 ============ -->
+      <section class="view is-active" data-view="map">
+
+        <div class="mapcard">
+          <div class="mapcard__canvas" id="tm-map"></div>
+
+          <!-- 足迹概览（**整块默认收起**）
+               地图左下角只留一个小胶囊「足迹概览」，点它才把整张卡展开。
+               卡片内部沿用原设计（内边距 13/16px、数字 28px、148px 最小宽度、
+               --r-lg 圆角都没动）——占地问题靠「默认藏起来」解决，不是把卡改小。
+               展开后那个小胶囊会转为绝对定位、挪到卡片右上角并缩成一个箭头：
+               卡片自己的标题就是「足迹概览」，按钮再跟着写一遍文字会重名；
+               放进卡内也不占额外高度，所以 --map-h 不用跟着改（窄屏不会顶出上沿）。 -->
+          <div class="statwrap">
+            <button class="ovw-toggle" id="tm-stat-toggle" type="button"
+                    aria-expanded="false" aria-controls="tm-statcard"
+                    title="展开足迹概览">
+              <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-chart"/></svg>
+              <span class="ovw-toggle__label">足迹概览</span>
+              <svg class="ovw-toggle__chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14.5l6-6 6 6"/></svg>
+            </button>
+
+            <div class="statcard" id="tm-statcard" hidden>
+              <p class="statcard__title">足迹概览</p>
+              <div class="statcard__row"><span class="statcard__num" data-count="tm-stat-countries">0</span><span class="statcard__unit">国家/地区</span></div>
+              <div class="statcard__row"><span class="statcard__num" data-count="tm-stat-cities">0</span><span class="statcard__unit">城市</span></div>
+              <div class="statcard__row"><span class="statcard__num" data-count="tm-stat-trips">0</span><span class="statcard__unit">次旅行</span></div>
+              <button class="btn btn--pill" data-view="footprints">查看全部足迹
+                <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+              </button>
+              <!-- 图例：按 types 分类筛选图钉显隐（点击切换）。
+                   原先是地图右下角的独立胶囊，现并入本卡；三个类型横排；
+                   国家「已访问 / 未访问」的说明已移除
+                   （该说明仍在「设置」页的调色板一节）。 -->
+              <div class="legend" id="tm-legend" role="group" aria-label="按类型筛选图钉"></div>
+            </div>
+          </div>
+
+          <!-- 缩放 / 复位 -->
+          <div class="zoomctl">
+            <button class="zoomctl__btn" id="tm-zoom-in" title="放大" aria-label="放大">
+              <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>
+            </button>
+            <span class="zoomctl__sep"></span>
+            <button class="zoomctl__btn" id="tm-zoom-out" title="缩小" aria-label="缩小">
+              <svg class="ico" viewBox="0 0 24 24"><use href="#i-minus"/></svg>
+            </button>
+            <span class="zoomctl__sep"></span>
+            <button class="zoomctl__btn" id="tm-reset" title="回到初始视角" aria-label="回到初始视角">
+              <svg class="ico" viewBox="0 0 24 24"><use href="#i-target"/></svg>
+            </button>
+          </div>
+
+          <!-- 地图状态：瓦片异常时低调提示 -->
+          <div class="mapcard__status" id="tm-map-status" hidden></div>
+        </div>
+
+        <!-- 左列：最近足迹 + 愿望清单 + 我的记录（上下叠放） ｜ 右列：旅途海报（两列等高）
+             2026-10-06 改版：右列原来是「选中地点详情」卡（点图钉才更新，静止时大半时间是
+             「选择一处足迹」的占位态，占着最大的一块地方却没内容），换成海报墙 ——
+             从全部多媒体里随机抽，尺寸不等、各自随机翻牌替换。 -->
+        <div class="grid grid--main">
+          <div class="maincol">
+              <section class="card" id="tm-card-recent">
+              <div class="card__head">
+                <div class="tabs" id="tm-recent-tabs" role="tablist">
+                  <button class="tabs__btn is-active" data-media="all" role="tab">
+                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>最近足迹
+                  </button>
+                  <button class="tabs__btn" data-media="image" role="tab">
+                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-image"/></svg>照片
+                  </button>
+                  <button class="tabs__btn" data-media="video" role="tab">
+                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-video"/></svg>视频
+                  </button>
+                  <button class="tabs__btn" data-media="text" role="tab">
+                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-note"/></svg>笔记
+                  </button>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="mediagrid" id="tm-recent-grid"></div>
+              </div>
+              <div class="card__foot">
+                <button class="link" data-view="footprints">查看全部足迹
+                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+                </button>
+              </div>
+            </section>
+
+            <!-- 愿望清单预览：原在 grid--minor（与「我的记录」并排），
+                 改版后上移到左列、叠在「最近足迹」下面。 -->
+            <section class="card" id="tm-card-wishlist">
+              <div class="card__head card__head--spread">
+                <h3 class="card__title">愿望清单</h3>
+                <button class="link" data-view="wishlist">查看全部
+                  <span class="muted" id="tm-wish-total">(0)</span>
+                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+                </button>
+              </div>
+              <div class="card__body">
+                <div class="strip" id="tm-strip-wishlist"></div>
+              </div>
+            </section>
+
+            <!-- 我的记录：2026-10-06 也上移到左列（原来单独占下面一整行），
+                 这样下半区只有两列：左列三张卡叠放 ｜ 右列一张海报墙。 -->
+            <section class="card" id="tm-card-collections">
+              <div class="card__head card__head--spread">
+                <h3 class="card__title">我的记录</h3>
+                <button class="link" data-view="collections">查看全部
+                  <span class="muted" id="tm-coll-total">(0)</span>
+                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+                </button>
+              </div>
+              <div class="card__body">
+                <div class="strip" id="tm-strip-collections"></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- 旅途海报：多张同时陈列，尺寸不等，各自随机翻牌；视频只取首帧当封面。
+               块数 / 格子比例 / 翻牌间隔见 css/poster.css 与 js/poster.js。 -->
+          <section class="card card--poster" id="tm-card-poster">
+            <div class="card__head card__head--spread">
+              <h3 class="card__title">旅途海报</h3>
+              <button class="link" data-view="collections">查看全部
+                <span class="muted" id="tm-poster-total">(0)</span>
+                <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+              </button>
+            </div>
+            <div class="card__body">
+              <div class="posterwall" id="tm-poster-wall"></div>
+            </div>
+            <div class="card__foot">
+              <button class="btn btn--pill" id="tm-poster-shuffle">换一批</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============ 其余视图 ============ -->
+      <section class="view" data-view="footprints" hidden>
+        <div class="card"><div class="card__body" id="tm-view-footprints"></div></div>
+      </section>
+      <section class="view" data-view="collections" hidden>
+        <div class="chips" id="tm-coll-filter"></div>
+        <div class="card"><div class="card__body" id="tm-view-collections"></div></div>
+      </section>
+      <section class="view" data-view="wishlist" hidden>
+        <div class="card"><div class="card__body" id="tm-view-wishlist"></div></div>
+      </section>
+      <section class="view" data-view="stats" hidden>
+        <div class="card"><div class="card__body" id="tm-view-stats"></div></div>
+      </section>
+      <section class="view" data-view="settings" hidden>
+        <div class="card"><div class="card__body" id="tm-view-settings"></div></div>
+      </section>
+
+      <footer class="sitefoot">
+        <span id="tm-status">正在加载…</span>
+        <span class="sitefoot__sep">·</span>
+        <span>底图 © <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> /
+          数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+          贡献者 · 国界 © <a href="https://www.naturalearthdata.com" target="_blank" rel="noopener">Natural Earth</a></span>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<!-- ================= 图钉详情弹窗 ================= -->
+<div class="modal" id="tm-modal" hidden>
+  <div class="modal__mask" data-close="1"></div>
+  <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="tm-modal-title">
+    <button class="modal__close" id="tm-modal-close" aria-label="关闭">
+      <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+    </button>
+
+    <div class="modal__mapwrap" id="tm-modal-mapwrap">
+      <div class="modal__map" id="tm-modal-map"></div>
+      <div class="modal__mapblur" id="tm-modal-mapblur"></div>
+      <div class="modal__mapedge"></div>
+      <div class="modal__mapbadge" id="tm-modal-badge"></div>
+    </div>
+
+    <div class="modal__body" id="tm-modal-body">
+      <!-- 固定高度占位：高度恒为 --mw-max，保证内容总高在地图收缩过程中不变 -->
+      <div class="modal__pad" aria-hidden="true"></div>
+      <div class="modal__head">
+        <span class="typeDot" id="tm-modal-dot"></span>
+        <div class="modal__meta">
+          <h3 class="modal__title" id="tm-modal-title">—</h3>
+          <p class="modal__sub" id="tm-modal-sub">—</p>
+        </div>
+      </div>
+      <div class="modal__tabs" id="tm-modal-tabs" role="tablist"></div>
+      <div class="modal__content" id="tm-modal-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 全屏预览 ================= -->
+<div class="lightbox" id="tm-lightbox" hidden>
+  <div class="lightbox__mask" data-close="1"></div>
+  <button class="lightbox__close" data-close="1" aria-label="关闭预览">
+    <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+  </button>
+  <button class="lightbox__nav lightbox__nav--prev" id="tm-lb-prev" aria-label="上一个">
+    <svg class="ico" viewBox="0 0 24 24"><use href="#i-left"/></svg>
+  </button>
+  <button class="lightbox__nav lightbox__nav--next" id="tm-lb-next" aria-label="下一个">
+    <svg class="ico" viewBox="0 0 24 24"><use href="#i-right"/></svg>
+  </button>
+  <figure class="lightbox__stage" id="tm-lb-stage"></figure>
+  <div class="lightbox__bar">
+    <span class="lightbox__counter" id="tm-lb-counter"></span>
+    <span class="lightbox__caption" id="tm-lb-caption"></span>
+  </div>
+</div>
+
+<!-- ================= 记录新足迹（新增地点 + 上传媒体） ================= -->
+<div class="modal-edit" id="tm-add-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-labelledby="tm-add-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-add-title">记录新足迹</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <form id="tm-add-form" class="modal-edit__body">
+      <div class="form-row">
+        <label class="form-label" for="tm-add-name">地点名称 *</label>
+        <input id="tm-add-name" class="form-input" type="text" placeholder="如：京都" maxlength="40" required />
+      </div>
+      <div class="form-row form-row--2">
+        <div>
+          <label class="form-label" for="tm-add-type">类型</label>
+          <select id="tm-add-type" class="form-input">
+            <option value="居住">居住</option>
+            <option value="旅行" selected>旅行</option>
+            <option value="目的地">目的地</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="tm-add-date">日期</label>
+          <input id="tm-add-date" class="form-input" type="date" />
+        </div>
+        <div>
+          <label class="form-label" for="tm-add-enddate">结束日期（可选）</label>
+          <input id="tm-add-enddate" class="form-input" type="date" />
+        </div>
+      </div>
+      <div class="form-row form-row--2">
+        <div>
+          <label class="form-label" for="tm-add-lng">经度 *</label>
+          <input id="tm-add-lng" class="form-input" type="number" step="0.0001" placeholder="-180 ~ 180" />
+        </div>
+        <div>
+          <label class="form-label" for="tm-add-lat">纬度 *</label>
+          <input id="tm-add-lat" class="form-input" type="number" step="0.0001" placeholder="-90 ~ 90" />
+        </div>
+      </div>
+      <div class="form-row">
+        <button type="button" class="btn btn--ghost" id="tm-add-pick">在地图上拾取坐标</button>
+      </div>
+      <div class="form-row form-row--2">
+        <div>
+          <label class="form-label" for="tm-add-country">国家代码（可选）</label>
+          <input id="tm-add-country" class="form-input" type="text" placeholder="如 CN / JP" maxlength="3" />
+        </div>
+        <div>
+          <label class="form-label" for="tm-add-city">城市（可选）</label>
+          <input id="tm-add-city" class="form-input" type="text" placeholder="如 京都" maxlength="40" />
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-add-desc">简介（可选）</label>
+        <textarea id="tm-add-desc" class="form-input" rows="2" maxlength="300" placeholder="一两句回忆"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-add-files">照片 / 视频</label>
+        <input id="tm-add-files" class="form-input" type="file" accept="image/*,video/*" multiple />
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-add-caption">媒体说明（可选）</label>
+        <input id="tm-add-caption" class="form-input" type="text" placeholder="给这批照片/视频的统一说明" maxlength="80" />
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-add-note">文字笔记（可选）</label>
+        <textarea id="tm-add-note" class="form-input" rows="2" maxlength="1000" placeholder="写点什么"></textarea>
+      </div>
+      <p class="form-status" id="tm-add-status"></p>
+      <div class="modal-edit__foot">
+        <button type="button" class="btn btn--ghost" id="tm-add-cancel">取消</button>
+        <button type="submit" class="btn btn--primary" id="tm-add-submit">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 登录遮罩 ================= -->
+<div class="login" id="tm-login" hidden>
+  <div class="login__card">
+    <div class="login__logo">
+      <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>
+    </div>
+    <h2 class="login__title">My Travel Map</h2>
+    <p class="login__sub">请输入访问密码</p>
+    <form id="tm-login-form" class="login__form">
+      <input id="tm-login-password" type="password" class="login__input" placeholder="密码" autocomplete="current-password" />
+      <button type="submit" class="btn btn--primary login__btn">进入</button>
+      <p class="login__error" id="tm-login-error"></p>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 首次配置遮罩 ================= -->
+<div class="login" id="tm-setup" hidden>
+  <div class="login__card login__card--wide">
+    <div class="login__logo">
+      <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>
+    </div>
+    <h2 class="login__title">欢迎使用 My Travel Map</h2>
+    <p class="login__sub">首次使用，请选择「媒体存储方式」</p>
+
+      <form id="tm-setup-form" class="login__form" autocomplete="off">
+      <div class="setup__mode" role="radiogroup" aria-label="存储方式">
+        <label class="setup__opt">
+          <input type="radio" name="tm-setup-mode" value="minio" checked />
+          <span><b>对象存储 MinIO</b><i>内置 MinIO，开箱即用；也能指向你自己的 MinIO / 阿里云 OSS</i></span>
+        </label>
+        <label class="setup__opt">
+          <input type="radio" name="tm-setup-mode" value="local" />
+          <span><b>本地目录</b><i>媒体直接存到服务器上的一个文件夹</i></span>
+        </label>
+      </div>
+
+      <!-- 对象存储 -->
+      <div id="tm-setup-minio">
+        <p class="setup__hint">已为你填好内置 MinIO 的连接信息，无特殊需求直接点「保存并进入」即可。以后想换成自己的 MinIO 或阿里云 OSS，也能在这里改。</p>
+        <div class="setup__row">
+          <div>
+            <label class="setup__label" for="tm-setup-endpoint">服务器地址</label>
+            <input id="tm-setup-endpoint" class="login__input" type="text" placeholder="如 minio 或 oss-cn-hangzhou.aliyuncs.com" />
+          </div>
+          <div>
+            <label class="setup__label" for="tm-setup-port">端口</label>
+            <input id="tm-setup-port" class="login__input" type="number" placeholder="9000" />
+          </div>
+        </div>
+        <div class="setup__row">
+          <div>
+            <label class="setup__label" for="tm-setup-access">账号 AccessKey</label>
+            <input id="tm-setup-access" class="login__input" type="text" placeholder="AccessKey" />
+          </div>
+          <div>
+            <label class="setup__label" for="tm-setup-secret">密码 SecretKey</label>
+            <input id="tm-setup-secret" class="login__input" type="password" placeholder="SecretKey" />
+          </div>
+        </div>
+        <div class="setup__row">
+          <div>
+            <label class="setup__label" for="tm-setup-bucket">桶名 Bucket</label>
+            <input id="tm-setup-bucket" class="login__input" type="text" placeholder="travelmap" />
+          </div>
+          <div class="setup__ssl">
+            <label class="setup__label" for="tm-setup-ssl">启用 HTTPS</label>
+            <input id="tm-setup-ssl" type="checkbox" autocomplete="off" />
+            <p class="setup__hint setup__hint--inline">仅当 MinIO / OSS 端点启用 HTTPS 时才勾选。<br><b>内置 MinIO 用 HTTP，请勿勾选。</b></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 本地目录 -->
+      <div id="tm-setup-local" hidden>
+        <p class="setup__hint">填写服务器上一个目录（绝对路径，或相对于数据目录的路径），媒体文件会直接存到这里。</p>
+        <div class="setup__row">
+          <div>
+            <label class="setup__label" for="tm-setup-dir">本地目录路径</label>
+            <input id="tm-setup-dir" class="login__input" type="text" placeholder="如 /data/media 或 media" />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn--primary login__btn" id="tm-setup-save">保存并进入</button>
+      <p class="login__error" id="tm-setup-error"></p>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 启动 / 错误遮罩 ================= -->
+<div class="boot" id="tm-boot">
+  <div class="boot__spinner"></div>
+  <p class="boot__text">正在加载地图…<br><span class="muted">首次打开需联网获取矢量瓦片</span></p>
+</div>
+
+<div class="boot boot--error" id="tm-boot-error" hidden>
+  <div class="boot__emoji">🧭</div>
+  <p class="boot__text" id="tm-boot-error-msg">加载失败</p>
+  <p class="boot__hint">
+    请确认后端服务已启动，并通过 HTTP 访问本页面。<br>
+    若设置了访问密码，请先登录。
+  </p>
+</div>
+
+<div class="boot boot--error" id="tm-boot-file" hidden>
+  <div class="boot__emoji">⚠️</div>
+  <p class="boot__text">不要用 file:// 直接打开这个页面</p>
+  <p class="boot__hint">
+    本项目的模块化脚本与 <code>places.json</code> 需要经由 HTTP 加载。<br>
+    请在项目根目录执行 <code>python3 -m http.server 8080</code>，<br>
+    然后访问 <code>http://localhost:8080</code>
+  </p>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+<script>
+/* file:// 兜底提示：ES Module 会静默失败，这里给出人话解释 */
+if (location.protocol === 'file:') {
+  document.getElementById('tm-boot').hidden = true;
+  document.getElementById('tm-boot-file').hidden = false;
+}
+</script>
+</body>
+</html>

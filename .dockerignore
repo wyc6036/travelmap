@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.DS_Store
+.git
+.gitignore
+# 已有数据/媒体不进镜像（运行时由挂载卷提供）；但 data/seed 需进镜像做初始种子，故单独保留
+data/media
+*.db
+*.db-shm
+*.db-wal

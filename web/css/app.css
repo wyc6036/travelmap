@@ -1,0 +1,186 @@
+/* =========================================================
+   app.css · 独立部署版新增 UI
+   ---------------------------------------------------------
+   登录遮罩（login）、记录新足迹弹窗（modal-edit）、
+   地图拾取临时图钉（tm-temp-pin）、退出按钮。
+   视觉沿用 tokens.css 的设计令牌，不写死颜色。
+   ========================================================= */
+
+/* ---------- 登录遮罩 ---------- */
+.login {
+  position: fixed;
+  inset: 0;
+  z-index: 110;            /* 盖在启动遮罩之上 */
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(124, 156, 195, .12), transparent 60%),
+    rgba(251, 246, 240, .92);
+  backdrop-filter: blur(6px);
+}
+.login[hidden] { display: none; }
+
+.login__card {
+  width: min(360px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-4);
+  padding: 32px 28px 28px;
+  text-align: center;
+}
+.login__logo {
+  width: 52px; height: 52px;
+  margin: 0 auto 14px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+.login__logo .ico { width: 26px; height: 26px; }
+.login__title { font-size: var(--fs-2xl); font-weight: 600; color: var(--ink); margin: 0; }
+.login__sub { margin: 6px 0 22px; color: var(--ink-3); font-size: var(--fs-md); }
+.login__form { display: flex; flex-direction: column; gap: 12px; }
+.login__input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: var(--fs-base);
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  outline: none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.login__input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-tint);
+}
+.login__btn { width: 100%; justify-content: center; }
+.login__error { min-height: 1em; margin: 2px 0 0; color: var(--danger); font-size: var(--fs-sm); }
+
+/* ---------- 首次配置向导（复用 .login 遮罩） ---------- */
+.login__card--wide { width: min(460px, 100%); }
+.setup__mode { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.setup__opt {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md);
+  cursor: pointer; background: var(--surface-2);
+}
+.setup__opt input { margin-top: 3px; accent-color: var(--primary); }
+.setup__opt span { display: flex; flex-direction: column; gap: 2px; }
+.setup__opt b { color: var(--ink); font-weight: 600; font-size: var(--fs-base); }
+.setup__opt i { color: var(--ink-3); font-style: normal; font-size: var(--fs-sm); }
+.setup__opt:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-tint); }
+.setup__label { display: block; font-size: var(--fs-sm); color: var(--ink-3); margin-bottom: 5px; }
+.setup__row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.setup__row > div { min-width: 0; }
+.setup__hint {
+  font-size: var(--fs-sm); color: var(--ink-3); line-height: 1.5;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 10px 12px; margin: 4px 0 14px;
+}
+.setup__hint--inline {
+  font-size: var(--fs-xs); background: transparent; border: 0;
+  padding: 4px 0 0; margin: 0; color: var(--danger);
+}
+.setup__ssl { display: flex; flex-direction: column; justify-content: flex-end; }
+.setup__ssl input { width: 20px; height: 20px; accent-color: var(--primary); margin-bottom: 4px; }
+
+/* ---------- 记录新足迹弹窗 ---------- */
+.modal-edit {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.modal-edit[hidden] { display: none; }
+.modal-edit__mask {
+  position: absolute; inset: 0;
+  background: rgba(40, 34, 28, .42);
+  backdrop-filter: blur(3px);
+}
+.modal-edit__panel {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-4);
+  overflow: hidden;
+}
+.modal-edit__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.modal-edit__head h3 { margin: 0; font-size: var(--fs-xl); color: var(--ink); font-weight: 600; }
+.modal-edit__close {
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  border: none; background: transparent; color: var(--ink-2);
+  border-radius: var(--r-xs); cursor: pointer;
+}
+.modal-edit__close:hover { background: var(--bg-warm); color: var(--ink); }
+.modal-edit__close .ico { width: 18px; height: 18px; }
+.modal-edit__body {
+  padding: 18px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.modal-edit__foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+/* 表单控件 */
+.form-row { display: flex; flex-direction: column; gap: 6px; }
+.form-row--2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-label { font-size: var(--fs-sm); color: var(--ink-2); font-weight: 500; }
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: var(--fs-base);
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  outline: none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-tint);
+}
+textarea.form-input { resize: vertical; min-height: 52px; line-height: 1.5; }
+.form-status { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); min-height: 1em; }
+.form-status.is-error { color: var(--danger); }
+
+/* ---------- 地图拾取临时图钉 ---------- */
+.tm-temp-pin {
+  width: 18px; height: 18px;
+  border-radius: 50% 50% 50% 0;
+  background: var(--primary);
+  border: 2px solid #fff;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px rgba(40, 34, 28, .35);
+}
+
+/* ---------- 退出按钮（默认隐藏，仅启用密码时显示） ---------- */
+#tm-logout { /* 复用 .btn .btn--ghost；此处仅作占位，无额外样式 */ }
+#tm-logout[hidden] { display: none; }
+
+/* 窄屏：两列表单退为单列 */
+@media (max-width: 560px) {
+  .form-row--2 { grid-template-columns: 1fr; }
+}

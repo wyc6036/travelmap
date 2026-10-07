@@ -1,0 +1,14 @@
+# 用户媒体：MinIO 绑定挂载落盘（含 .minio.sys 与桶，量大且含隐私，勿提交）
+minio-data/
+# 应用数据：SQLite 库 + 上传媒体缩略图（含隐私，勿提交）。
+# 只忽略库文件与运行时生成的媒体，保留 data/seed/ 等镜像构建需要的种子。
+data/travelmap.db
+data/travelmap.db-shm
+data/travelmap.db-wal
+data/media/
+# 本地环境变量（可能含密码等敏感配置）
+.env
+# 依赖
+node_modules/
+# macOS
+.DS_Store
