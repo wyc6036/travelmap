@@ -23,7 +23,7 @@
 ## 二、项目结构
 
 ```
-travelmap-app/
+travelmap/
 ├── server.js                # Express 入口：静态托管 + REST API + 上传转码 + 首屏配置向导
 ├── src/
 │   ├── db.js                # SQLite 数据层；导出与 places.json 同构的数据；库为空时自动 seed
@@ -68,7 +68,7 @@ travelmap-app/
 
 ```bash
 # 1) 进入项目目录
-cd travelmap-app
+cd travelmap
 
 # 2)（可选但推荐）建一份 .env 改密码
 cp .env.example .env

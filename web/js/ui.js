@@ -22,6 +22,7 @@
  */
 
 import { MEDIA_LABELS, VIEW_META, COLORS, regionLabel } from './config.js';
+import { api } from './api.js';
 import {
   escapeHtml, formatDateDot, formatDateRange, countUp, toast,
 } from './utils.js';
@@ -59,7 +60,7 @@ function mediaCard(item, place, { onOpen, showPlace = true }) {
         ${item.type === 'video' ? `<span class="mcard__badge">${icon('video', 'ico ico--sm')}视频</span>` : ''}
       </div>`;
     const img = btn.querySelector('img');
-    img?.addEventListener('error', () => { img.src = './assets/placeholder-photo.svg'; }, { once: true });
+    img?.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; }, { once: true });
   }
 
   btn.insertAdjacentHTML('beforeend', `
@@ -79,7 +80,14 @@ function placeCard(place, { onOpen }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'mcard';
-  const cover = place.cover || './assets/placeholder-photo.svg';
+  /* 封面优先级：真实媒体（用户上传的图/视频首帧）> 联网地标占位图（cover_url）> 默认占位 SVG。
+     这样"上传真实媒体后占位图被替换 + 彻底让位"自然成立，无需额外判断。 */
+  const media = place.media || [];
+  const realCover = (media.find((m) => m.type === 'image') || {}).url
+    || (media.find((m) => m.type === 'video') || {}).poster
+    || (media.find((m) => m.type === 'video') || {}).url
+    || '';
+  const cover = realCover || place.cover || './assets/sidebar-art.svg';
   btn.innerHTML = `
     <div class="mcard__media">
       <img src="${escapeHtml(cover)}" alt="${escapeHtml(place.name)}"
@@ -93,7 +101,7 @@ function placeCard(place, { onOpen }) {
       </p>
     </div>`;
   const img = btn.querySelector('img');
-  img?.addEventListener('error', () => { img.src = './assets/placeholder-photo.svg'; }, { once: true });
+  img?.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; }, { once: true });
   btn.addEventListener('click', () => onOpen?.(place));
   return btn;
 }
@@ -159,7 +167,7 @@ function pickDom(map) {
   return out;
 }
 
-export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip }) {
+export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive }) {
   const dom = pickDom({
     nav: '#tm-nav',
     scroll: '#tm-scroll',
@@ -318,14 +326,16 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       }
       items.slice(0, 3).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenDetail })));
       if (!items.length) {
-        grid.innerHTML = emptyState(`还没有${MEDIA_LABELS[mediaFilter]}`, '在 places.json 的 media 字段里补充即可');
+        grid.innerHTML = emptyState(`还没有${MEDIA_LABELS[mediaFilter]}`, '打开地点详情，用「添加媒体」上传即可');
       }
     }
 
+    /* 与顶栏「新增」共用同一入口：main.js 把 onAddPlace 接到 addPlace.open()（新增/编辑足迹弹窗）。
+       ⚠️ 这里曾是前端壳子时代的演示 toast（"改 places.json 即可"），后端化之后忘了换，别再回退。 */
     grid.append(addTile(
       '添加新足迹',
       '点亮更多地方',
-      () => toast('本项目为纯前端演示：在 places.json 里新增一条地点即可，页面 10 秒内自动同步。', 4200),
+      () => (typeof onAddPlace === 'function' ? onAddPlace() : toast('新增足迹功能未就绪', 2600)),
     ));
   }
 
@@ -381,7 +391,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     dom.stripWishlist.innerHTML = '';
     const wish = wishlistPlaces();
     wish.slice(0, 6).forEach((p) => dom.stripWishlist.append(placeCard(p, { onOpen: onOpenDetail })));
-    if (!wish.length) dom.stripWishlist.innerHTML = emptyState('愿望清单是空的', '把 type 设为「目的地」，或填一个未来日期');
+    if (!wish.length) dom.stripWishlist.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
     dom.wishTotal.textContent = `(${wish.length})`;
   }
 
@@ -528,6 +538,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     row.querySelector('.tl__hit')
       .addEventListener('click', () => onOpenTrip?.(trip));
 
+    /* 编辑入口不放在时间线（用户要求：列表保持干净，编辑只进详情弹窗后操作 ——
+       行程详情弹窗头部的「编辑」已覆盖此需求，见 detail-modal.js 的 onEdit 接线）。 */
+
     /* 组内地点行。**升序**：与弹窗里"走一遍"的顺序一致（route.js 同样按 dateTs 排），
        两处不一致的话"列表第二行"和"动画第二站"就对不上。 */
     const sub = document.createElement('div');
@@ -569,7 +582,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
    */
   function renderFootprintsView() {
     const root = dom.viewFootprints;
-    if (!state.places.length) { root.innerHTML = emptyState('还没有足迹', '先往 places.json 里加一条'); return; }
+    if (!state.places.length) { root.innerHTML = emptyState('还没有足迹', '先点上方「+ 新增」创建一条足迹'); return; }
     const stats = computeStats();
     const now = Date.now();
 
@@ -616,7 +629,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     const filtered = collMediaFilter === 'all' ? pool : pool.filter((x) => x.m.type === collMediaFilter);
     root.innerHTML = '';
     if (!filtered.length) {
-      root.innerHTML = emptyState('这个分类还没有内容', '在 places.json 的 media 里补充即可');
+      root.innerHTML = emptyState('这个分类还没有内容', '打开地点详情，用「添加媒体」上传即可');
       return;
     }
     const grid = document.createElement('div');
@@ -630,7 +643,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     const list = wishlistPlaces();
     root.innerHTML = '';
     if (!list.length) {
-      root.innerHTML = emptyState('愿望清单是空的', '把 type 设为「目的地」，或填一个未来日期即可');
+      root.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期即可');
       return;
     }
     const grid = document.createElement('div');
@@ -660,7 +673,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     });
   }
 
-  function renderSettingsView({ styleKey, onStyleChange }) {
+  function renderSettingsView({ styleKey, onStyleChange, onDataReload }) {
     const root = dom.viewSettings;
     root.innerHTML = `
       <div class="sect">
@@ -670,15 +683,30 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       <div class="chips" id="tm-style-chips"></div>
 
       <div class="sect">
-        <div class="sect__title">数据</div>
-        <div class="sect__sub">修改 places.json 后无需刷新，最多 10 秒地图自动同步</div>
+        <div class="sect__title">数据备份与恢复</div>
+        <div class="sect__sub">导出为 zip 备份（含照片 / 视频与数据库快照）；新部署后导入该压缩包即可恢复全部数据</div>
       </div>
-      <div class="metarow">
-        <span class="metatag">数据文件 <b>places.json</b></span>
-        <span class="metatag">国家边界 <b>world.json</b></span>
-        <span class="metatag">轮询间隔 <b>10s</b></span>
-        <span class="metatag">地图引擎 <b>MapLibre GL JS v5</b></span>
-        <span class="metatag">投影 <b>mercator（平面）</b></span>
+      <div class="datarow">
+        <button class="btn btn--primary" id="tm-export-btn" type="button">导出备份（zip）</button>
+        <button class="btn" id="tm-import-btn" type="button">导入备份（zip）</button>
+        <input type="file" id="tm-import-file" accept=".zip,application/zip" hidden>
+      </div>
+
+      <div class="sect">
+        <div class="sect__title">批量照片归类</div>
+        <div class="sect__sub">把还没归类到地点的照片，按每张自带的 GPS 坐标自动识别城市、聚成地点。先看预览再确认写入。</div>
+      </div>
+      <div class="datarow">
+        <button class="btn" id="tm-archive-btn" type="button">智能归档（按 GPS 自动建地点）</button>
+      </div>
+
+      <div class="sect">
+        <div class="sect__title">高德逆地理编码（可选增强）</div>
+        <div class="sect__sub">留空则用内置离线城市库（GeoNames，约 3.4 万城市）。填入高德 Web 服务 Key 后，中文地名更精确、可细到区/县。Key 仅保存在本机数据库，不上传。</div>
+      </div>
+      <div class="datarow">
+        <input type="text" id="tm-amap-key" class="input" placeholder="高德 Web 服务 Key（留空用离线库）" autocomplete="off" spellcheck="false">
+        <button class="btn" id="tm-amap-save" type="button">保存 Key</button>
       </div>
 
       <div class="sect">
@@ -690,12 +718,21 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       </div>
 
       <div class="sect">
+        <div class="sect__title">系统信息</div>
+        <div class="sect__sub">当前部署的运行环境与数据来源</div>
+      </div>
+      <div class="metarow">
+        <span class="metatag">数据 · 后端数据库（SQLite）</span>
+        <span class="metatag">国家边界 <b>world.json</b></span>
+        <span class="metatag">轮询间隔 <b>15s</b></span>
+        <span class="metatag">地图引擎 <b>MapLibre GL JS v5</b></span>
+        <span class="metatag">投影 <b>mercator（平面）</b></span>
+      </div>
+
+      <div class="sect">
         <div class="sect__title">说明</div>
       </div>
-      <div class="notecard">
-        本项目支持上传真实照片 / 视频 / 笔记。点「记录新足迹」新增地点并上传媒体；
-        未上传媒体时该地点不显示图片，上传后自动出现。
-      </div>`;
+      <div class="notecard">本项目支持上传真实照片 / 视频 / 笔记。点「记录新足迹」新增地点并上传媒体；未上传媒体时该地点不显示图片，上传后自动出现。</div>`;
 
     const chips = root.querySelector('#tm-style-chips');
     Object.keys({ positron: 1, liberty: 1, bright: 1 }).forEach((key) => {
@@ -710,6 +747,64 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       });
       chips.append(b);
     });
+
+    /* 数据备份 / 恢复 */
+    const exportBtn = root.querySelector('#tm-export-btn');
+    const importBtn = root.querySelector('#tm-import-btn');
+    const importFile = root.querySelector('#tm-import-file');
+    exportBtn.addEventListener('click', async () => {
+      try {
+        setStatus('正在导出备份…');
+        await api.exportZip();
+        setStatus('导出完成 ✓');
+        toast('备份已导出');
+      } catch (e) {
+        setStatus('导出失败');
+        toast(e.message || '导出失败');
+      }
+    });
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', async () => {
+      const f = importFile.files && importFile.files[0];
+      if (!f) return;
+      if (!window.confirm('导入将覆盖当前全部地点、行程、媒体与资料，确定继续吗？\n（建议先导出一份备份）')) {
+        importFile.value = '';
+        return;
+      }
+      try {
+        setStatus('正在导入备份…');
+        const r = await api.importZip(f);
+        toast(`导入完成：地点 ${r.places || 0} · 行程 ${r.trips || 0} · 媒体 ${r.media || 0}`);
+        setStatus('导入完成，正在刷新…');
+        if (typeof onDataReload === 'function') onDataReload();
+        importFile.value = '';
+      } catch (e) {
+        setStatus('导入失败');
+        toast(e.message || '导入失败');
+        importFile.value = '';
+      }
+    });
+
+    /* 批量照片归类（智能归档） */
+    const archiveBtn = root.querySelector('#tm-archive-btn');
+    if (archiveBtn && typeof onOpenArchive === 'function') {
+      archiveBtn.addEventListener('click', () => onOpenArchive());
+    }
+
+    /* 高德 Key（可选逆地理增强）：预填 + 保存 */
+    const amapInput = root.querySelector('#tm-amap-key');
+    const amapSave = root.querySelector('#tm-amap-save');
+    if (amapInput && amapSave) {
+      api.getMeta('amapKey').then((r) => { if (r && r.value) amapInput.value = r.value; }).catch(() => {});
+      amapSave.addEventListener('click', async () => {
+        try {
+          await api.setMeta('amapKey', amapInput.value.trim());
+          toast('高德 Key 已保存');
+        } catch (e) {
+          toast(e.message || '保存失败');
+        }
+      });
+    }
   }
 
   /* ---------- 汇总渲染 ---------- */

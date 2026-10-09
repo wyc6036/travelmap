@@ -110,8 +110,8 @@ if (location.protocol === 'file:') {
 
     <div class="sidebar__foot">
       <div class="usercard">
-        <div class="usercard__head">
-          <div class="avatar" aria-hidden="true">
+        <button class="usercard__open" id="tm-user-open" type="button" aria-label="编辑个人资料">
+          <div class="avatar" id="tm-user-avatar" aria-hidden="true">
             <svg viewBox="0 0 48 48"><defs><linearGradient id="avaG" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0" stop-color="#BFD3E4"/><stop offset="1" stop-color="#8FAAC6"/></linearGradient></defs>
               <rect width="48" height="48" fill="url(#avaG)"/>
@@ -119,8 +119,8 @@ if (location.protocol === 'file:') {
               <path d="M9 48c1.6-9.6 8-15 15-15s13.4 5.4 15 15z" fill="#FBF6F0" opacity=".9"/>
             </svg>
           </div>
-          <p class="usercard__hi">Hi, Coral</p>
-        </div>
+          <p class="usercard__hi" id="tm-user-hi">Hi, Coral</p>
+        </button>
         <p class="usercard__line">已点亮 <b id="tm-user-countries">0</b> 个国家/地区</p>
         <p class="usercard__line">探索世界的 <b id="tm-user-pct">0%</b></p>
         <div class="progress"><i id="tm-user-bar" style="width:0%"></i></div>
@@ -129,21 +129,7 @@ if (location.protocol === 'file:') {
         </button>
       </div>
 
-      <svg class="sidebar__art" viewBox="0 0 200 96" aria-hidden="true">
-        <path d="M0 78h200" stroke="#DDD3C4" stroke-width="1"/>
-        <path d="M22 78 58 34l20 22 14-15 30 37z" fill="#E8E0D2" stroke="#C9BFAC" stroke-width=".9" stroke-linejoin="round"/>
-        <path d="M58 34 44 52h28z" fill="#F3EEE5"/>
-        <path d="M118 78 148 46l26 32z" fill="#E2DACB" stroke="#C9BFAC" stroke-width=".9" stroke-linejoin="round"/>
-        <path d="M148 46 140 57h16z" fill="#F3EEE5"/>
-        <g stroke="#B7AC97" stroke-width=".9" fill="#DCD2BF">
-          <path d="M14 78V62l-9 8zM14 78V62l9 8zM14 64V52l-6 6zM14 64V52l6 6z"/>
-          <path d="M178 78V56l-11 9zM178 78V56l11 9zM178 60V44l-7 7zM178 60V44l7 7z"/>
-        </g>
-        <g fill="none" stroke="#CFC4B0" stroke-width=".9">
-          <ellipse cx="100" cy="24" rx="18" ry="7"/><ellipse cx="100" cy="24" rx="11" ry="4"/>
-          <path d="M170 16c4 0 6 3 6 6"/><path d="M34 18c3 0 5 2 5 5"/>
-        </g>
-      </svg>
+      <img class="sidebar__art" src="./assets/sidebar-art.svg" alt="风景插画" width="1551" height="1014">
     </div>
   </aside>
 
@@ -244,7 +230,7 @@ if (location.protocol === 'file:') {
         <div class="grid grid--main">
           <div class="maincol">
               <section class="card" id="tm-card-recent">
-              <div class="card__head">
+              <div class="card__head card__head--spread">
                 <div class="tabs" id="tm-recent-tabs" role="tablist">
                   <button class="tabs__btn is-active" data-media="all" role="tab">
                     <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>最近足迹
@@ -259,14 +245,12 @@ if (location.protocol === 'file:') {
                     <svg class="ico" viewBox="0 0 24 24"><use href="#i-note"/></svg>笔记
                   </button>
                 </div>
-              </div>
-              <div class="card__body">
-                <div class="mediagrid" id="tm-recent-grid"></div>
-              </div>
-              <div class="card__foot">
-                <button class="link" data-view="footprints">查看全部足迹
+                <button class="link" data-view="footprints">查看全部
                   <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
                 </button>
+              </div>
+              <div class="card__body">
+                <div class="strip" id="tm-recent-grid"></div>
               </div>
             </section>
 
@@ -306,16 +290,16 @@ if (location.protocol === 'file:') {
           <section class="card card--poster" id="tm-card-poster">
             <div class="card__head card__head--spread">
               <h3 class="card__title">旅途海报</h3>
-              <button class="link" data-view="collections">查看全部
-                <span class="muted" id="tm-poster-total">(0)</span>
-                <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
-              </button>
+              <div class="card__actions">
+                <button class="btn btn--pill" id="tm-poster-shuffle">换一批</button>
+                <button class="link" data-view="collections">查看全部
+                  <span class="muted" id="tm-poster-total">(0)</span>
+                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+                </button>
+              </div>
             </div>
             <div class="card__body">
               <div class="posterwall" id="tm-poster-wall"></div>
-            </div>
-            <div class="card__foot">
-              <button class="btn btn--pill" id="tm-poster-shuffle">换一批</button>
             </div>
           </section>
         </div>
@@ -374,38 +358,64 @@ if (location.protocol === 'file:') {
           <h3 class="modal__title" id="tm-modal-title">—</h3>
           <p class="modal__sub" id="tm-modal-sub">—</p>
         </div>
-        <button class="modal__edit" id="tm-modal-edit" type="button" hidden>
-          <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑
-        </button>
-        <button class="modal__delete" id="tm-modal-delete" type="button" hidden>
-          <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg>删除
-        </button>
+        <div class="modal__actions">
+          <button class="modal__add" id="tm-modal-addbtn" type="button" hidden>
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-plus"/></svg>添加媒体
+          </button>
+          <button class="modal__edit" id="tm-modal-edit" type="button" hidden>
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑
+          </button>
+          <button class="modal__delete" id="tm-modal-delete" type="button" hidden>
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg>删除
+          </button>
+        </div>
       </div>
       <div class="modal__tabs" id="tm-modal-tabs" role="tablist"></div>
       <div class="modal__content" id="tm-modal-content"></div>
+    </div>
+  </div>
+</div>
 
-      <!-- 补充上传媒体（仅单地点详情可见；图片/视频走文件上传，文本走输入框） -->
-      <div class="modal__addmedia" id="tm-modal-addmedia">
-        <button type="button" class="addmedia__toggle" id="tm-modal-addbtn" hidden>
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>添加媒体
-        </button>
-        <div class="addmedia__panel" id="tm-modal-addpanel" hidden>
-          <div class="addmedia__group">
-            <label class="addmedia__file" for="tm-modal-file">
-              <svg class="ico" viewBox="0 0 24 24"><use href="#i-image"/></svg><span>选择图片 / 视频</span>
-            </label>
-            <input id="tm-modal-file" type="file" accept="image/*,video/*" multiple hidden />
-            <input id="tm-modal-cap1" class="form-input addmedia__cap" type="text" placeholder="媒体说明（可选）" maxlength="80" />
-            <button type="button" class="btn btn--primary addmedia__go" id="tm-modal-upload">上传</button>
-          </div>
-          <div class="addmedia__group">
-            <textarea id="tm-modal-text" class="form-input addmedia__text" rows="2" maxlength="1000" placeholder="写点文字笔记…"></textarea>
-            <input id="tm-modal-cap2" class="form-input addmedia__cap" type="text" placeholder="笔记标题（可选）" maxlength="80" />
-            <button type="button" class="btn btn--primary addmedia__go" id="tm-modal-addtext">添加文字</button>
-          </div>
-          <p class="addmedia__status" id="tm-modal-addstatus"></p>
-        </div>
+<!-- ================= 添加媒体弹窗（从详情弹窗「添加媒体」按钮打开） ================= -->
+<div class="modal-edit" id="tm-upload-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-labelledby="tm-upload-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-upload-title">添加媒体</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="modal-edit__body">
+      <!-- 拖拽 / 点选区 -->
+      <div class="upload__drop" id="tm-upload-drop">
+        <svg class="ico upload__drop-ico" viewBox="0 0 24 24"><use href="#i-image"/></svg>
+        <p class="upload__drop-text">点击选择，或把图片 / 视频拖到这里</p>
+        <p class="upload__drop-hint">支持多选；上传前可为每条单独重命名</p>
+        <input id="tm-upload-input" type="file" accept="image/*,video/*" multiple hidden />
       </div>
+
+      <!-- 已选文件列表（每条可重命名） -->
+      <div class="upload__list" id="tm-upload-list"></div>
+
+      <!-- 整体上传进度 -->
+      <div class="upload__progress" id="tm-upload-progress" hidden>
+        <div class="upload__bar"><i id="tm-upload-fill"></i></div>
+        <span class="upload__progress-label" id="tm-upload-progress-label"></span>
+      </div>
+
+      <!-- 文字笔记（可选，与文件二选一或都传） -->
+      <div class="upload__note">
+        <label class="form-label" for="tm-upload-note">文字笔记（可选）</label>
+        <textarea id="tm-upload-note" class="form-input" rows="2" maxlength="1000" placeholder="写点什么…"></textarea>
+        <input id="tm-upload-notecap" class="form-input" type="text" placeholder="笔记标题（可选）" maxlength="80" />
+      </div>
+
+      <p class="form-status" id="tm-upload-status"></p>
+    </div>
+    <div class="modal-edit__foot">
+      <button type="button" class="btn btn--ghost" id="tm-upload-cancel">取消</button>
+      <button type="button" class="btn btn--primary" id="tm-upload-go">开始上传</button>
     </div>
   </div>
 </div>
@@ -416,13 +426,19 @@ if (location.protocol === 'file:') {
   <button class="lightbox__close" data-close="1" aria-label="关闭预览">
     <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
   </button>
-  <button class="lightbox__nav lightbox__nav--prev" id="tm-lb-prev" aria-label="上一个">
-    <svg class="ico" viewBox="0 0 24 24"><use href="#i-left"/></svg>
-  </button>
-  <button class="lightbox__nav lightbox__nav--next" id="tm-lb-next" aria-label="下一个">
-    <svg class="ico" viewBox="0 0 24 24"><use href="#i-right"/></svg>
-  </button>
-  <figure class="lightbox__stage" id="tm-lb-stage"></figure>
+  <div class="lightbox__layout">
+    <figure class="lightbox__stage" id="tm-lb-stage">
+      <button class="lightbox__nav lightbox__nav--prev" id="tm-lb-prev" aria-label="上一个">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-left"/></svg>
+      </button>
+      <button class="lightbox__nav lightbox__nav--next" id="tm-lb-next" aria-label="下一个">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-right"/></svg>
+      </button>
+    </figure>
+    <aside class="lightbox__info" id="tm-lb-info" aria-label="媒体信息">
+      <div class="lightbox__info-scroll" id="tm-lb-info-scroll"></div>
+    </aside>
+  </div>
   <div class="lightbox__bar">
     <span class="lightbox__counter" id="tm-lb-counter"></span>
     <span class="lightbox__caption" id="tm-lb-caption"></span>
@@ -477,11 +493,14 @@ if (location.protocol === 'file:') {
       <div class="form-row form-row--2">
         <div>
           <label class="form-label" for="tm-add-lng">经度 *</label>
-          <input id="tm-add-lng" class="form-input" type="number" step="0.0001" placeholder="-180 ~ 180" />
+          <!-- step="any"：不启用原生 step 校验。地图拾取/在线补全会给出 5 位小数，
+               step=0.0001 时浏览器会拦提交并弹"最接近的有效值是…"（数据其实合法）；
+               精度统一在 upload.js 提交前收敛（round 到 5 位）。 -->
+          <input id="tm-add-lng" class="form-input" type="number" step="any" placeholder="-180 ~ 180" />
         </div>
         <div>
           <label class="form-label" for="tm-add-lat">纬度 *</label>
-          <input id="tm-add-lat" class="form-input" type="number" step="0.0001" placeholder="-90 ~ 90" />
+          <input id="tm-add-lat" class="form-input" type="number" step="any" placeholder="-90 ~ 90" />
         </div>
       </div>
       <div class="form-row">
@@ -542,6 +561,94 @@ if (location.protocol === 'file:') {
       <div class="modal-edit__foot">
         <button type="button" class="btn btn--ghost" id="tm-trip-cancel">取消</button>
         <button type="submit" class="btn btn--primary" id="tm-trip-submit">保存行程</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 批量照片归类（按 GPS 自动建地点） ================= -->
+<div class="modal-edit" id="tm-archive-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel modal-edit__panel--wide" role="dialog" aria-modal="true" aria-labelledby="tm-archive-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-archive-title">批量照片归类</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="modal-edit__body" id="tm-archive-body"></div>
+    <div class="modal-edit__foot" id="tm-archive-foot"></div>
+  </div>
+</div>
+
+<!-- ================= 上传零散照片（暂不归类） ================= -->
+<div class="modal-edit" id="tm-scatter-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-labelledby="tm-scatter-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-scatter-title">上传零散照片</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="modal-edit__body">
+      <p class="form-status">照片会先「暂不归类」，之后在「批量照片归类」里按 GPS 自动归到地点。</p>
+      <div class="upload__drop" id="tm-scatter-drop">
+        <svg class="ico upload__drop-ico" viewBox="0 0 24 24"><use href="#i-image"/></svg>
+        <p class="upload__drop-text">点击选择，或把图片 / 视频拖到这里</p>
+        <p class="upload__drop-hint">支持多选；上传后可在归档里按 GPS 自动建地点</p>
+        <input id="tm-scatter-input" type="file" accept="image/*,video/*" multiple hidden />
+      </div>
+      <div class="upload__list" id="tm-scatter-list"></div>
+      <div class="upload__progress" id="tm-scatter-progress" hidden>
+        <div class="upload__bar"><i id="tm-scatter-fill"></i></div>
+        <span class="upload__progress-label" id="tm-scatter-progress-label"></span>
+      </div>
+      <p class="form-status" id="tm-scatter-status"></p>
+    </div>
+    <div class="modal-edit__foot">
+      <button type="button" class="btn btn--ghost" data-close="1">取消</button>
+      <button type="button" class="btn btn--primary" id="tm-scatter-go">开始上传</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 个人资料弹窗 ================= -->
+<div class="modal-edit" id="tm-user-modal" hidden>
+  <div class="modal-edit__mask" data-close="1"></div>
+  <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-labelledby="tm-user-title">
+    <header class="modal-edit__head">
+      <h3 id="tm-user-title">个人资料</h3>
+      <button class="modal-edit__close" data-close="1" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <form id="tm-user-form" class="modal-edit__body">
+      <div class="form-row user-row">
+        <div class="avatar avatar--lg" id="tm-user-modal-avatar" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><defs><linearGradient id="avaG2" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#BFD3E4"/><stop offset="1" stop-color="#8FAAC6"/></linearGradient></defs>
+            <rect width="48" height="48" fill="url(#avaG2)"/>
+            <circle cx="24" cy="19" r="7.4" fill="#FBF6F0" opacity=".9"/>
+            <path d="M9 48c1.6-9.6 8-15 15-15s13.4 5.4 15 15z" fill="#FBF6F0" opacity=".9"/>
+          </svg>
+        </div>
+        <div class="user-row__side">
+          <button type="button" class="btn btn--ghost btn--sm" id="tm-user-change-av">
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-image"/></svg>更换头像
+          </button>
+          <p class="user-row__hint">建议正方形图片，将自动裁剪为 256×256</p>
+          <input id="tm-user-avinput" type="file" accept="image/*" hidden />
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="tm-user-name">用户名</label>
+        <input id="tm-user-name" class="form-input" type="text" maxlength="40" placeholder="你的名字" />
+      </div>
+      <p class="form-status" id="tm-user-status"></p>
+      <div class="modal-edit__foot">
+        <button type="button" class="btn btn--ghost" data-close="1">取消</button>
+        <button type="submit" class="btn btn--primary" id="tm-user-save">保存</button>
       </div>
     </form>
   </div>
@@ -656,7 +763,7 @@ if (location.protocol === 'file:') {
   <div class="boot__emoji">⚠️</div>
   <p class="boot__text">不要用 file:// 直接打开这个页面</p>
   <p class="boot__hint">
-    本项目的模块化脚本与 <code>places.json</code> 需要经由 HTTP 加载。<br>
+    本项目的模块化脚本与后端接口（<code>/api/data</code>）需要经由 HTTP 加载。<br>
     请在项目根目录执行 <code>python3 -m http.server 8080</code>，<br>
     然后访问 <code>http://localhost:8080</code>
   </p>

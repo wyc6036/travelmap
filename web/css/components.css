@@ -123,8 +123,20 @@
   box-shadow: var(--sh-2);
 }
 .usercard__head { display: flex; align-items: center; gap: 9px; }
+.usercard__open {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; margin: 0; padding: 0;
+  background: none; border: 0; border-radius: var(--r-md);
+  cursor: pointer; text-align: left; color: inherit; font: inherit;
+  transition: background .15s ease;
+}
+.usercard__open:hover { background: var(--bg-warm, rgba(0,0,0,.04)); }
+.usercard__open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.usercard__open .usercard__hi { color: var(--ink); }
 .avatar { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex: 0 0 auto; box-shadow: var(--sh-1); }
-.avatar svg { width: 100%; height: 100%; }
+.avatar svg { width: 100%; height: 100%; display: block; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar--lg { width: 72px; height: 72px; flex: 0 0 auto; }
 .usercard__hi { font-size: var(--fs-lg); font-weight: 600; }
 .usercard__line { font-size: var(--fs-md); color: var(--ink-2); }
 .usercard__line b { color: var(--ink); font-weight: 600; }
@@ -326,7 +338,7 @@
 
 /* 缩放控件 */
 .zoomctl {
-  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  position: absolute; right: 16px; bottom: 16px; transform: none;
   z-index: var(--z-map-overlay);
   display: flex; flex-direction: column; align-items: center;
   background: var(--glass);
@@ -641,12 +653,30 @@
 .mcard--add .mcard__hint { font-size: var(--fs-sm); font-weight: 600; }
 .mcard--add .mcard__hint2 { font-size: var(--fs-xs); }
 
-/* 横向条带（我的记录 / 愿望清单） */
+/* 横向条带（我的记录 / 愿望清单 / 最近足迹）
+   ⚠️ grid-auto-columns 的**上限必须封顶**：原先写成 minmax(118px, 1fr)，
+   1fr 会让条目少时把每张卡片拉伸占满整行（愿望清单尤其明显 —— 它的地点少，
+   于是每张卡被拉得特别大，看起来"模块太大"）。改成固定上限 180px +
+   justify-content:start，条目少时卡片保持原尺寸、左对齐排布，
+   与"最近足迹""我的记录"两个模块完全一致。 */
 .strip {
-  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(118px, 1fr);
-  gap: 11px; overflow-x: auto; padding-bottom: 4px;
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(118px, 180px);
+  gap: 11px; overflow-x: auto; justify-content: start;
+  /* ⚠️ overflow-x:auto 会按规范连带把 overflow-y 也算成 auto —— 条带成了
+     竖直方向上的裁剪容器。卡片 hover 上浮 2px（.mcard:hover 的 translateY）
+     时顶部正好贴着内容盒上沿，被削掉一条（最近足迹图块最明显）。
+     padding-top 给裁剪盒留出上浮空间，margin-top 负值把版面位置原样补回，
+     静止时视觉零变化；三个条带（最近足迹/我的记录/愿望清单）一起修好。 */
+  padding-top: 3px; margin-top: -3px; padding-bottom: 4px;
 }
 .strip .mcard { min-width: 0; }
+
+/* 空状态在条带里的居中修复：.empty 落进 .strip（grid-auto-flow:column +
+   auto-columns minmax(118px,180px)）会成为第一个网格项，被压成 118~180px 的
+   窄列贴在最左——愿望清单空文案"挤在左边"就是这个原因，不是文字没居中
+   （.empty 本身有 text-align:center，只是盒子太窄）。
+   条带里只剩空状态时退回块级布局，用 :has() 一处覆盖三个条带，不必 JS 加类。 */
+.strip:has(> .empty) { display: block; }
 
 /* 时间线条目 —— 现在只服务「足迹」一页（年份 → 行程 → 地点 两级） */
 .tl { display: flex; flex-direction: column; gap: 18px; }
@@ -1141,10 +1171,19 @@
 }
 
 /* 区块标题 */
-.sect { margin: 4px 0 12px; }
+.sect { margin: 0 0 12px; }
 .sect__title { font-size: var(--fs-lg); font-weight: 700; }
-.sect__sub { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 2px; }
-.sect + .sect { margin-top: 22px; }
+.sect__sub { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 3px; }
+/* 区块之间拉开呼吸。
+   ⚠️ 原来写的是 `.sect + .sect { margin-top: 22px }`，**从未命中过** ——
+      设置页里每个 .sect 后面都跟着 chips / datarow / metarow 等内容块，
+      两个 .sect 从不相邻，这条规则匹配不到任何元素；
+      于是区块之间只剩 .sect 自带的 4px，反而比"标题到自己内容"的 12px 还小 ——
+      区块边界比区块内部更紧，视觉层次整个是反的，整页看起来很挤。
+      实测：chips→下一标题 4px、metarow→下一标题 4px。
+   改成对"非首个"区块统一给足上间距（首个保持 0，避免顶部凭空留白）。
+   .sect 目前只用于设置页（renderSettingsView），不会波及别的视图。 */
+.card__body > .sect:not(:first-child) { margin-top: 28px; }
 
 /* 空状态 */
 .empty {

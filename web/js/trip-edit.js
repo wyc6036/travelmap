@@ -2,9 +2,11 @@
  * trip-edit.js · 新建行程组（多地点行程）
  * -----------------------------------------------------------
  * 提供 createAddTrip({ getPlaces, onSaved })：
- *   - open()   打开「新建行程」弹窗，列出当前所有地点供勾选
+ *   - open()       打开「新建行程」弹窗，列出当前所有地点供勾选
+ *   - edit(trip)   打开「编辑行程」弹窗，预填名称/日期/已选地点；勾选=加入足迹点、取消勾选=移除
  *   - 表单：行程名称 / 日期 / 勾选参与地点（≥1 个）
- *   - 提交后调用 api.createTrip({ name, date, places:[ids] })
+ *   - 新建议调用 api.createTrip({ name, date, places:[ids] })；
+ *     编辑调用 api.updateTrip(id, { name, date, places:[ids] })（后端整体覆盖 trip_places，增删即改勾选）
  *   - 成功后 onSaved()（main.js 用它立即刷新数据，不必等轮询）
  *
  * 不直接绑 #tm-trip：那个按钮由 ui.js 统一调度，点击时调 onAddTrip 回调，
@@ -17,6 +19,7 @@ import { toast } from './utils.js';
 let modal, form, statusEl, placesBox;
 let placeGetter = () => [];
 let onSaved = () => {};
+let editingTrip = null;   // 非 null = 编辑模式（edit(trip) 打开），null = 新建模式（open() 打开）
 
 function $(id) { return document.getElementById(id); }
 
@@ -83,13 +86,28 @@ export function createAddTrip({ getPlaces, onSaved: saved } = {}) {
     await submit();
   });
 
-  return { open, close };
+  return { open, edit: (trip) => open(trip), close };
 }
 
-function open() {
+function open(trip = null) {
   if (!modal) return;
+  editingTrip = trip || null;
   resetForm();
   renderPlaces();
+  const titleEl = $('tm-trip-title');
+  const submitBtn = $('tm-trip-submit');
+  if (editingTrip) {
+    // 编辑模式：预填名称/日期，并勾选已有足迹点
+    if (titleEl) titleEl.textContent = '编辑行程';
+    if (submitBtn) submitBtn.textContent = '保存修改';
+    const nameEl = $('tm-trip-name'); if (nameEl) nameEl.value = editingTrip.name || '';
+    const dateEl = $('tm-trip-date'); if (dateEl) dateEl.value = editingTrip.date || '';
+    const ids = new Set((editingTrip.places || []).map((p) => p.id).filter(Boolean));
+    placesBox?.querySelectorAll('.tm-trip-cb').forEach((cb) => { cb.checked = ids.has(cb.value); });
+  } else {
+    if (titleEl) titleEl.textContent = '新建行程';
+    if (submitBtn) submitBtn.textContent = '保存行程';
+  }
   modal.hidden = false;
   $('tm-trip-name')?.focus();
 }
@@ -117,10 +135,16 @@ async function submit() {
   showStatus('正在保存行程…');
 
   try {
-    const created = await api.createTrip({ name, date, places: ids });
-    if (!created) throw new Error('服务端未确认');
+    let ok;
+    if (editingTrip) {
+      ok = await api.updateTrip(editingTrip.id, { name, date, places: ids });
+      toast(`已更新行程「${name}」`, 2600);
+    } else {
+      ok = await api.createTrip({ name, date, places: ids });
+      toast(`已创建行程「${name}」`, 2600);
+    }
+    if (!ok) throw new Error('服务端未确认');
     showStatus('已保存 ✓');
-    toast(`已创建行程「${name}」`, 2600);
     onSaved();
     setTimeout(close, 350);
   } catch (err) {

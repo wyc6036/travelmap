@@ -67,11 +67,38 @@ CREATE TABLE IF NOT EXISTS media (
   width       INTEGER DEFAULT 0,
   height      INTEGER DEFAULT 0,
   taken_at    TEXT DEFAULT '',
+  /* 媒体元数据（从原文件 EXIF / 视频标签提取，供查看页信息栏展示）。
+     缺失即空串 / 0，前端按"有值才显示"渲染。 */
+  camera_make TEXT DEFAULT '',
+  camera_model TEXT DEFAULT '',
+  lens        TEXT DEFAULT '',
+  gps_lat     REAL DEFAULT 0,
+  gps_lng     REAL DEFAULT 0,
+  focal_length REAL DEFAULT 0,
+  f_number    REAL DEFAULT 0,
+  iso         INTEGER DEFAULT 0,
   sort_index  INTEGER DEFAULT 0,
   status      TEXT DEFAULT 'ready',
   created_at  TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS geocities (
+  geonameid   TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  asciiname   TEXT DEFAULT '',
+  lat         REAL NOT NULL,
+  lng         REAL NOT NULL,
+  country     TEXT DEFAULT '',
+  admin1      TEXT DEFAULT '',
+  population  INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS geocities_latlng ON geocities(lat, lng);
 `);
+
+/* 老库补列必须赶在下面的预备语句之前：stmt.insertMedia / stmt.setMediaMeta
+   引用了 media 的 8 个元数据列，若旧库缺列，require 阶段 prepare 就会抛
+   "table media has no column named camera_make" 并让进程崩溃循环。
+   （migrateMediaMeta 是函数声明，有提升，这里可安全调用下方定义。） */
+migrateMediaMeta();
 
 /* ----------------------------- 写入 API ----------------------------- */
 
@@ -105,15 +132,33 @@ const stmt = {
   setTripPlaces: db.prepare('DELETE FROM trip_places WHERE trip_id=?'),
   addTripPlace: db.prepare('INSERT OR IGNORE INTO trip_places (trip_id,place_id,sort_order) VALUES (?,?,?)'),
   insertMedia: db.prepare(`
-    INSERT INTO media (id,place_id,trip_id,kind,url,thumb_url,caption,text_body,width,height,taken_at,sort_index,status)
-    VALUES (@id,@place_id,@trip_id,@kind,@url,@thumb_url,@caption,@text_body,@width,@height,@taken_at,@sort_index,@status)
+    INSERT INTO media (id,place_id,trip_id,kind,url,thumb_url,caption,text_body,width,height,taken_at,
+      camera_make,camera_model,lens,gps_lat,gps_lng,focal_length,f_number,iso,sort_index,status)
+    VALUES (@id,@place_id,@trip_id,@kind,@url,@thumb_url,@caption,@text_body,@width,@height,@taken_at,
+      @camera_make,@camera_model,@lens,@gps_lat,@gps_lng,@focal_length,@f_number,@iso,@sort_index,@status)
+  `),
+  /* 媒体元数据（上传后回填：图片走 sharp+exif-reader，视频走 ffprobe） */
+  setMediaMeta: db.prepare(`
+    UPDATE media SET camera_make=@camera_make, camera_model=@camera_model, lens=@lens,
+      gps_lat=@gps_lat, gps_lng=@gps_lng, focal_length=@focal_length, f_number=@f_number, iso=@iso
+    WHERE id=@id
   `),
   setMediaStatus: db.prepare('UPDATE media SET url=?, thumb_url=?, status=? WHERE id=?'),
   setMediaErr: db.prepare("UPDATE media SET status='error' WHERE id=?"),
+  setPlaceCoverUrl: db.prepare('UPDATE places SET cover_url=? WHERE id=?'),
   getTypes: db.prepare("SELECT value FROM meta WHERE key='types'"),
   setTypes: db.prepare("INSERT INTO meta (key,value) VALUES ('types',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
   getMeta: db.prepare("SELECT value FROM meta WHERE key=?"),
   setMeta: db.prepare("INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
+  /* 地理编码城市库（GeoNames cities15000，约 3.4 万城市，城市级粒度）。 */
+  geocitiesCount: db.prepare('SELECT COUNT(*) AS n FROM geocities'),
+  insertGeocity: db.prepare('INSERT OR IGNORE INTO geocities (geonameid,name,asciiname,lat,lng,country,admin1,population) VALUES (?,?,?,?,?,?,?,?)'),
+  /* 未归类（place_id 为空）且带 GPS 的媒体：批量归档的分析对象 */
+  unassignedGps: db.prepare("SELECT id,kind,url,thumb_url,caption,taken_at,gps_lat,gps_lng FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='') AND (gps_lat<>0 OR gps_lng<>0)"),
+  /* 无 GPS 的未归类媒体：需用户手动指派 */
+  unassignedNoGps: db.prepare("SELECT id,kind,url,thumb_url,caption,taken_at FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='') AND gps_lat=0 AND gps_lng=0"),
+  allPlacesLite: db.prepare('SELECT id,name,lng,lat FROM places'),
+  assignMedia: db.prepare("UPDATE media SET place_id=? WHERE id=?"),
 };
 
 function saveTypes(types) {
@@ -196,9 +241,34 @@ function createTrip(t) {
 }
 
 function deleteTrip(id) {
+  /* 先取出该行程下媒体的 url / thumb_url（删完 DB 行就查不到了），
+     拿到底层对象 key。 */
+  const rows = db.prepare('SELECT url, thumb_url FROM media WHERE trip_id=?').all(id);
+  /* 先删 DB 行：行程媒体 + 行程-地点关联 + 行程本体，保证立刻从列表消失。 */
   stmt.delTripMedia.run(id);
   stmt.setTripPlaces.run(id);
   stmt.delTrip.run(id);
+  /* 再尽力删底层对象（图 / 缩略图 / 视频 / 首帧），失败仅告警，不阻塞主流程。
+     与 deletePlace 同一套做法：storage 惰性 require，避免循环依赖在加载期互相阻塞。
+     ⚠️ 注意：delTripMedia 会把"同时挂在某地点上"的媒体行也一起删掉（既有行为），
+     这类媒体的底层对象同样在此清理，避免删行不删文件的孤儿残留。 */
+  const keys = [];
+  for (const r of rows) {
+    for (const u of [r.url, r.thumb_url]) {
+      if (!u) continue;
+      const k = String(u).split('/media/')[1];
+      if (k) keys.push(k);
+    }
+  }
+  if (keys.length) {
+    const storage = require('./storage');
+    (async () => {
+      for (const k of keys) {
+        try { await storage.deleteObject(k); }
+        catch (e) { console.warn('[deleteTrip] 删除底层对象失败：', k, e.message); }
+      }
+    })();
+  }
 }
 
 function addMedia(m) {
@@ -215,10 +285,38 @@ function addMedia(m) {
     width: Number(m.width || 0),
     height: Number(m.height || 0),
     taken_at: String(m.taken_at || ''),
+    camera_make: String(m.camera_make || ''),
+    camera_model: String(m.camera_model || ''),
+    lens: String(m.lens || ''),
+    gps_lat: Number(m.gps_lat || 0),
+    gps_lng: Number(m.gps_lng || 0),
+    focal_length: Number(m.focal_length || 0),
+    f_number: Number(m.f_number || 0),
+    iso: Number(m.iso || 0),
     sort_index: Number(m.sort_index || 0),
     status: m.status || 'ready',
   });
   return id;
+}
+
+/**
+ * 上传后回填媒体元数据（EXIF / 视频标签提取结果）。
+ * 只更新这 8 个元数据列，不动 url / 宽高 / 状态，便于视频在转码完（markMediaReady）后再补。
+ */
+function setMediaMeta(id, m) {
+  if (!m) return false;
+  stmt.setMediaMeta.run({
+    id: String(id),
+    camera_make: String(m.camera_make || ''),
+    camera_model: String(m.camera_model || ''),
+    lens: String(m.lens || ''),
+    gps_lat: Number(m.gps_lat || 0),
+    gps_lng: Number(m.gps_lng || 0),
+    focal_length: Number(m.focal_length || 0),
+    f_number: Number(m.f_number || 0),
+    iso: Number(m.iso || 0),
+  });
+  return true;
 }
 
 function markMediaReady(id, url, thumb_url) {
@@ -226,6 +324,121 @@ function markMediaReady(id, url, thumb_url) {
 }
 function markMediaError(id) {
   stmt.setMediaErr.run(id);
+}
+
+/**
+ * 更新单条媒体的可编辑字段（目前支持 caption 重命名、taken_at 拍摄时间）。
+ * 只改调用方显式传入的字段，未传的保持原值。
+ * @returns {boolean} 是否真的改到了行（id 不存在返回 false）
+ */
+function updateMedia(id, fields) {
+  if (!fields || typeof fields !== 'object') return false;
+  const sets = [];
+  const vals = [];
+  if (typeof fields.caption === 'string') { sets.push('caption = ?'); vals.push(fields.caption); }
+  if (typeof fields.taken_at === 'string') { sets.push('taken_at = ?'); vals.push(fields.taken_at); }
+  if (!sets.length) return false;
+  vals.push(id);
+  const r = db.prepare(`UPDATE media SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  return r.changes > 0;
+}
+
+/**
+ * 写入 / 清空某地点的封面图（cover_url）。
+ * - 占位图场景：新增愿望清单地点时由服务端联网拉取地标图后写入。
+ * - 清理场景：用户上传真实媒体后把占位图 URL 置空（封面改由媒体兜底），
+ *   满足"上传媒体后占位图需完全被清理掉"。
+ * @param {string} id   地点 id
+ * @param {string|null} url  封面 URL；传 null/'' 表示清空
+ */
+function setPlaceCoverUrl(id, url) {
+  stmt.setPlaceCoverUrl.run(String(url == null ? '' : url), String(id));
+  return true;
+}
+
+/* ----------------------------- 批量 GPS 归档（地理编码） ----------------------------- */
+
+/** 把媒体指派到某地点（批量归档的核心写操作）。 */
+function assignMediaToPlace(mediaId, placeId) {
+  stmt.assignMedia.run(String(placeId || ''), String(mediaId));
+  return true;
+}
+
+/** 未归类且带 GPS 的媒体（分析对象）。 */
+function getUnassignedMediaWithGps() {
+  return stmt.unassignedGps.all();
+}
+
+/** 未归类且无 GPS 的媒体（需手动指派）。 */
+function getUnassignedNoGps() {
+  return stmt.unassignedNoGps.all();
+}
+
+/** 全部地点的轻量字段（用于「距已有地点多近就归入」的距离匹配）。 */
+function getAllPlacesLite() {
+  return stmt.allPlacesLite.all();
+}
+
+/** geocities 表当前行数（0 表示城市库尚未导入，逆地理编码不可用）。 */
+function getGeocitiesCount() {
+  return stmt.geocitiesCount.get().n;
+}
+
+/**
+ * 把 GeoNames cities15000.txt（tab 分隔，19 列）解析并批量写入 geocities 表。
+ * 取列：0=geonameid 1=name 2=asciiname 4=纬度 5=经度 8=国家码 10=admin1 14=人口。
+ * 用事务包裹，整批失败回滚；已存在的 geonameid 走 INSERT OR IGNORE（幂等可重跑）。
+ * @param {string} txtPath
+ * @returns {number} 实际插入行数
+ */
+function importGeocities(txtPath) {
+  const content = fs.readFileSync(txtPath, 'utf8');
+  const lines = content.split('\n');
+  const rows = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    if (c.length < 6) continue;
+    const lat = parseFloat(c[4]);
+    const lng = parseFloat(c[5]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const population = parseInt(c[14] || '0', 10) || 0;
+    rows.push([c[0], c[1], c[2] || c[1], lat, lng, c[8] || '', c[10] || '', population]);
+  }
+  const ins = db.transaction((rs) => { for (const r of rs) stmt.insertGeocity.run(r); });
+  ins(rows);
+  return rows.length;
+}
+
+/**
+ * 启动时确保城市库已导入（幂等）：表为空且镜像内 / 数据目录里能找到
+ * cities15000.txt 才导入；否则打印警告并降级（批量归档退化为「手动归类」，
+ * 不影响其余功能）。导入只发生一次（表在挂载卷 /data 的库里，重建容器不丢）。
+ * @returns {number} 库内城市行数
+ */
+function ensureGeocitiesLoaded() {
+  try {
+    const n = getGeocitiesCount();
+    if (n > 0) return n;
+    const candidates = [
+      path.join(__dirname, '..', 'geonames', 'cities15000.txt'),
+      path.join(DATA_DIR, 'geonames', 'cities15000.txt'),
+      '/app/geonames/cities15000.txt',
+    ];
+    const file = candidates.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    });
+    if (!file) {
+      console.warn('[geocode] 未找到 cities15000.txt，逆地理编码不可用（批量 GPS 归档将退化为手动归类）');
+      return 0;
+    }
+    const cnt = importGeocities(file);
+    console.log(`[geocode] 已从 ${file} 导入 ${cnt} 个城市到 geocities 表`);
+    return cnt;
+  } catch (e) {
+    console.error('[geocode] 导入城市库失败：', e.message);
+    return 0;
+  }
 }
 
 /**
@@ -261,7 +474,13 @@ function getExport() {
   const mediaByPlace = {};
   const mediaByTrip = {};
   for (const m of mediaRows) {
-    const item = { id: m.id, type: m.kind, url: m.url, caption: m.caption, poster: m.thumb_url || '' };
+    const item = {
+      id: m.id, type: m.kind, url: m.url, caption: m.caption, poster: m.thumb_url || '',
+      takenAt: m.taken_at || '',
+      cameraMake: m.camera_make || '', cameraModel: m.camera_model || '', lens: m.lens || '',
+      gpsLat: Number(m.gps_lat) || 0, gpsLng: Number(m.gps_lng) || 0,
+      focalLength: Number(m.focal_length) || 0, fNumber: Number(m.f_number) || 0, iso: Number(m.iso) || 0,
+    };
     if (m.text_body) item.text = m.text_body;
     if (m.place_id) (mediaByPlace[m.place_id] ||= []).push(item);
     if (m.trip_id) (mediaByTrip[m.trip_id] ||= []).push(item);
@@ -294,6 +513,155 @@ function getExport() {
   }));
 
   return { types, places, trips };
+}
+
+/* ----------------------------- 备份迁移 ----------------------------- */
+
+/**
+ * 导出完整数据集（供打包成 zip 备份）。
+ * 与 getExport() 不同：这里导出的是「数据库原始行」而非前端归一化结构，
+ * 且 media 表全量导出（含处理中 / 失败态，便于精确还原），
+ * 连同 types（类型调色板）与 userProfile（用户名 + 头像）一起带回。
+ * 媒体文件本身由 server 端按 url/thumb_url 去存储后端取流打包。
+ * @returns {{version:number, exportedAt:string, data:object}}
+ */
+function getExportBundle() {
+  const typesRow = stmt.getTypes.get();
+  const types = typesRow ? JSON.parse(typesRow.value || '{}') : {};
+  const profile = getMeta('userProfile') || null;
+  const places = db.prepare('SELECT * FROM places').all();
+  const trips = db.prepare('SELECT * FROM trips').all();
+  const tripPlaces = db.prepare('SELECT trip_id, place_id, sort_order FROM trip_places').all();
+  const media = db.prepare('SELECT * FROM media').all();
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: { types, userProfile: profile, places, trips, trip_places: tripPlaces, media },
+  };
+}
+
+/**
+ * 导出一份自洽的 SQLite 单文件快照（Buffer），随备份 zip 一起存档。
+ *
+ * ⚠️ 为什么必须先 checkpoint：本库开了 WAL 模式，服务运行期间**近期写入都还堆在
+ *    travelmap.db-wal 里**（实测主库文件可以一整天没动过）。若直接读主库文件打包，
+ *    拿到的会是一个落后若干个事务的库 —— 单独 cp .db 恢复就会静默丢数据。
+ *    `wal_checkpoint(TRUNCATE)` 把 WAL 内容写回主库并把日志截断归零，
+ *    此后 travelmap.db 自身即完整自洽，可以直接 sqlite3 打开。
+ *
+ * checkpoint 是**尽力而为**：若此刻恰有并发写事务，它可能只 checkpoint 一部分。
+ * 这只影响快照的"新鲜度"，不影响主流程 —— 恢复走的是 data.json，
+ * 这个 .db 文件只是给人的**兜底存档**，不是导入的数据源。
+ * @returns {Buffer}
+ */
+function exportDbSnapshot() {
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (e) {
+    console.warn('[export] checkpoint 失败（快照可能略滞后）：', e.message);
+  }
+  return fs.readFileSync(DB_PATH);
+}
+
+/** 从形如 "/media/<key>" 的 URL 里抽出对象 key；非本地对象（远程 URL）返回空串。 */
+function collectKeysFromUrls(urls) {
+  const keys = [];
+  for (const u of urls) {
+    if (!u) continue;
+    const k = String(u).split('/media/')[1];
+    if (k) keys.push(k);
+  }
+  return keys;
+}
+
+/**
+ * 按当前库的列定义，把一组行安全插入某表。
+ * 取「数据库列 ∩ 行字段」的交集，避免导出方与导入方 schema 版本不一致时
+ * （导出方多列 / 导入方缺列，或反之）INSERT 报错；缺失的列走 DEFAULT。
+ * @param {string} table 表名
+ * @param {Array<object>} rows 原始行（字段名即列名）
+ */
+function insertRowsSafe(table, rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  const dbCols = new Set((db.pragma(`table_info(${table})`) || []).map((c) => c.name));
+  const cols = Object.keys(rows[0]).filter((k) => dbCols.has(k));
+  if (!cols.length) return;
+  const stmtIns = db.prepare(
+    `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map((c) => '@' + c).join(',')})`,
+  );
+  const run = db.transaction((rs) => { for (const r of rs) stmtIns.run(r); });
+  run(rows);
+}
+
+/**
+ * 导入完整数据集：在一个事务里清空旧表、重建新数据，并回设 types / userProfile。
+ * 媒体文件本身由 server 端先 putObject 回存，这里只处理数据库。
+ * 导入前先快照「旧库引用的对象 key」，导入后删掉「新数据不再引用」的孤儿对象，
+ * 避免恢复后底层存储残留上一版的文件（与删除链路的"不留垃圾"一致）。
+ * @param {{version?:number, data:object}} bundle 解析自 data.json
+ * @returns {{places:number, trips:number, media:number, orphansDeleted:number}}
+ */
+function applyImportBundle(bundle) {
+  if (!bundle || !bundle.data || typeof bundle.data !== 'object') {
+    throw new Error('压缩包内容无效：缺少 data 字段');
+  }
+  const d = bundle.data;
+  const requireArr = (name) => {
+    if (!Array.isArray(d[name])) throw new Error(`压缩包内容无效：缺少 ${name} 数组`);
+    return d[name];
+  };
+  const places = requireArr('places');
+  const trips = requireArr('trips');
+  const tripPlaces = requireArr('trip_places');
+  const media = requireArr('media');
+
+  // 旧对象 key 快照（导入前先取，事务内 DELETE 后就查不到了）
+  const oldKeys = new Set();
+  for (const r of db.prepare('SELECT url, thumb_url FROM media').all()) {
+    collectKeysFromUrls([r.url, r.thumb_url]).forEach((k) => oldKeys.add(k));
+  }
+  const oldAvatar = getMeta('userProfile');
+  if (oldAvatar && oldAvatar.avatar) collectKeysFromUrls([oldAvatar.avatar]).forEach((k) => oldKeys.add(k));
+
+  // 新对象 key 集合（导入后保留，其余旧 key 视为孤儿）
+  const newKeys = new Set();
+  for (const m of media) collectKeysFromUrls([m.url, m.thumb_url]).forEach((k) => newKeys.add(k));
+  const prof = d.userProfile;
+  if (prof && prof.avatar) collectKeysFromUrls([prof.avatar]).forEach((k) => newKeys.add(k));
+  for (const p of places) collectKeysFromUrls([p.cover_url]).forEach((k) => newKeys.add(k));
+  for (const t of trips) collectKeysFromUrls([t.cover_url]).forEach((k) => newKeys.add(k));
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM trip_places').run();
+    db.prepare('DELETE FROM media').run();
+    db.prepare('DELETE FROM places').run();
+    db.prepare('DELETE FROM trips').run();
+    insertRowsSafe('places', places);
+    insertRowsSafe('trips', trips);
+    insertRowsSafe('trip_places', tripPlaces);
+    insertRowsSafe('media', media);
+    if (d.types && typeof d.types === 'object') stmt.setTypes.run(JSON.stringify(d.types));
+    if (prof && typeof prof === 'object') stmt.setMeta.run('userProfile', JSON.stringify(prof));
+  });
+  tx();
+
+  // 清理孤儿：删掉旧库里、新数据不再引用的对象（尽力删，失败仅告警，不阻塞）
+  const orphans = [...oldKeys].filter((k) => !newKeys.has(k));
+  if (orphans.length) {
+    const storage = require('./storage');
+    (async () => {
+      for (const k of orphans) {
+        try { await storage.deleteObject(k); }
+        catch (e) { console.warn('[import] 清理孤儿对象失败：', k, e.message); }
+      }
+    })();
+  }
+  return {
+    places: places.length,
+    trips: trips.length,
+    media: media.length,
+    orphansDeleted: orphans.length,
+  };
 }
 
 /* ----------------------------- 种子迁移 ----------------------------- */
@@ -352,10 +720,30 @@ function maybeSeed() {
   return true;
 }
 
+/**
+ * 媒体元数据迁移：老库（或老种子）的 media 表可能缺少 8 个元数据列，
+ * 这里在启动时按需 ALTER 补齐，避免 SELECT * 取到 undefined 字段。
+ * 用 PRAGMA table_info 探测，缺哪一列补哪一列（幂等，可反复跑）。
+ */
+function migrateMediaMeta() {
+  const have = new Set((db.pragma('table_info(media)') || []).map((c) => c.name));
+  const numericReal = ['gps_lat', 'gps_lng', 'focal_length', 'f_number'];
+  for (const col of ['camera_make', 'camera_model', 'lens', 'gps_lat', 'gps_lng', 'focal_length', 'f_number', 'iso']) {
+    if (!have.has(col)) {
+      const type = numericReal.includes(col) ? 'REAL' : (col === 'iso' ? 'INTEGER' : 'TEXT');
+      try { db.prepare(`ALTER TABLE media ADD COLUMN ${col} ${type} DEFAULT ''`).run(); }
+      catch (e) { console.warn('[migrate] media 加列失败', col, e.message); }
+    }
+  }
+}
+
 module.exports = {
   db, DB_PATH, DATA_DIR,
   uid, saveTypes, getMeta, setMeta,
   createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
+  updateMedia, setPlaceCoverUrl, setMediaMeta, migrateMediaMeta,
   markMediaReady, markMediaError,
-  getExport, maybeSeed,
+  getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed,
+  assignMediaToPlace, getUnassignedMediaWithGps, getUnassignedNoGps,
+  getAllPlacesLite, getGeocitiesCount, importGeocities, ensureGeocitiesLoaded,
 };

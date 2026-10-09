@@ -29,6 +29,25 @@ let cityAC = null;               // 城市自动补全下拉
 
 function $(id) { return document.getElementById(id); }
 
+const DEST_TYPE = '目的地';
+
+/* 类型为「目的地」（还没去过）时，隐藏媒体上传与笔记输入，
+   并清空可能残留的值，避免随提交悄悄上传尚不存在的素材。 */
+function syncTypeVisibility() {
+  const isDest = ($('tm-add-type')?.value || '') === DEST_TYPE;
+  ['tm-add-files', 'tm-add-caption', 'tm-add-note'].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    const row = el.closest('.form-row');
+    if (row) row.classList.toggle('is-hidden', isDest);
+  });
+  if (isDest) {
+    const f = $('tm-add-files'); if (f) f.value = '';
+    const c = $('tm-add-caption'); if (c) c.value = '';
+    const n = $('tm-add-note'); if (n) n.value = '';
+  }
+}
+
 function resetForm() {
   if (form) form.reset();
   if (statusEl) statusEl.textContent = '';
@@ -86,7 +105,7 @@ function renderExistingMedia() {
     const thumb = isText ? '' : (m.type === 'video' ? (m.poster || '') : (m.url || ''));
     const inner = isText
       ? `<div class="tm-exist__text">${escapeHtml((m.caption || m.text || '文字笔记').slice(0, 50))}</div>`
-      : `<img class="tm-exist__img" src="${escapeHtml(thumb || './assets/placeholder-photo.svg')}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+      : `<img class="tm-exist__img" src="${escapeHtml(thumb || './assets/sidebar-art.svg')}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
     cell.innerHTML = inner
       + `<button type="button" class="tm-exist__del" data-id="${escapeHtml(m.id)}" title="删除这条媒体" aria-label="删除媒体">`
       + '<svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>';
@@ -104,7 +123,7 @@ function renderExistingMedia() {
       }
     });
     const img = cell.querySelector('img');
-    if (img) img.addEventListener('error', () => { img.src = './assets/placeholder-photo.svg'; });
+    if (img) img.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; });
     grid.append(cell);
   });
   box.append(grid);
@@ -237,6 +256,9 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
     startPick();
   });
 
+  /* 类型切换：目的地隐藏媒体/笔记输入 */
+  $('tm-add-type')?.addEventListener('change', syncTypeVisibility);
+
   /* 城市自动补全 */
   $('tm-add-city')?.addEventListener('input', onCityInput);
   $('tm-add-city')?.addEventListener('focus', onCityInput);
@@ -256,6 +278,7 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
 function open() {
   if (!modal) return;
   resetForm();
+  syncTypeVisibility();
   modal.hidden = false;
   $('tm-add-name')?.focus();
 }
@@ -290,6 +313,7 @@ function edit(place) {
   const title = $('tm-add-title');
   if (title) title.textContent = '编辑足迹';
   renderExistingMedia();
+  syncTypeVisibility();
   modal.hidden = false;
   $('tm-add-name')?.focus();
 }
@@ -349,9 +373,15 @@ async function submit() {
     return;
   }
 
+  /* 精度收敛到 5 位小数（≈1.1m）：地图拾取/在线补全可能给出更长的小数，
+     入库前统一 round，避免出现 104.06573000000001 这类脏精度。 */
+  const r5 = (v) => Math.round(v * 1e5) / 1e5;
+  const lngS = r5(lng);
+  const latS = r5(lat);
+
   const place = {
     name,
-    coord: [lng, lat],
+    coord: [lngS, latS],
     type: $('tm-add-type')?.value || '旅行',
     date: $('tm-add-date')?.value || '',
     end_date: $('tm-add-enddate')?.value || '',     // ⚠️ 后端 db 读 end_date（原 endDate 字段名是 bug）

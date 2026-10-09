@@ -233,6 +233,52 @@ async function deleteObject(key) {
   }
 }
 
+/**
+ * 读取对象为 Buffer（用于导出 zip 时把媒体文件打包进压缩包）。
+ * 不存在 / 读取失败返回 null（导出侧据此跳过缺失文件，不中断）。
+ * @param {string} key 对象键（即 /media/<key> 的尾段）
+ * @returns {Promise<Buffer|null>}
+ */
+async function getObjectBuffer(key) {
+  if (!key) return null;
+  if (useMinio) {
+    try {
+      const stream = await client.getObject(config.minio.bucket, key);
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        stream.on('data', (c) => chunks.push(c));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      return Buffer.concat(chunks);
+    } catch (_) {
+      return null;
+    }
+  }
+  const p = path.join(localDir, key);
+  if (!fs.existsSync(p)) return null;
+  try { return fs.readFileSync(p); } catch (_) { return null; }
+}
+
+/**
+ * 把 Buffer 直接写成对象（用于导入 zip 时把媒体文件回存到存储后端）。
+ * 与 saveObject（接收本地文件路径）互补：导入不需要落盘中间文件。
+ * @param {string} key 对象键
+ * @param {Buffer} buffer 文件内容
+ * @param {string} contentType MIME 类型
+ */
+async function putObject(key, buffer, contentType) {
+  if (useMinio) {
+    await client.putObject(config.minio.bucket, key, buffer, buffer.length, {
+      'Content-Type': contentType || 'application/octet-stream',
+    });
+  } else {
+    const dest = path.join(localDir, key);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, buffer);
+  }
+}
+
 module.exports = {
   getStorageInfo,
   initStorage,
@@ -243,6 +289,8 @@ module.exports = {
   getObjectStream,
   objectExists,
   deleteObject,
+  getObjectBuffer,
+  putObject,
   bucketReady: () => bucketReady,
   TMP_DIR,
 };

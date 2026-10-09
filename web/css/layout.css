@@ -46,7 +46,7 @@
 
 .sidebar__foot { margin-top: auto; padding-top: 16px; }
 
-.sidebar__art { margin-top: 10px; width: 100%; height: auto; opacity: .95; }
+.sidebar__art { display: block; margin-top: 10px; width: 100%; height: auto; opacity: .95; border-radius: var(--r-sm); }
 
 /* ----------------- 主区 ----------------- */
 .main { min-width: 0; min-height: 0; }
@@ -201,6 +201,10 @@
   .sidebar__foot { margin: 0 0 0 auto; padding: 0; flex: 0 0 auto; }
   /* 提高一级特异性：不依赖文件加载顺序，避免被 components.css 的 display:flex 反杀 */
   .sidebar .usercard { display: none; }
+
+  /* 横向顶栏里风景插画改用紧凑小条：原 svg 的 width:100% 在 auto 宽 flex 项里会
+     回退到 1551px 固有宽度撑破整行，这里显式锁高度、按固有比例算宽，避免破版。 */
+  .sidebar__art { width: auto; height: 34px; margin: 0; border-radius: var(--r-xs); }
 
   .main__scroll { height: auto; overflow: visible; padding: 14px 14px 8px; }
   /* 下限 268px 是按「概览卡**展开**时的高度」定的：卡片整块收起后默认不占地方，

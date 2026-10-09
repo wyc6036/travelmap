@@ -29,9 +29,11 @@ import {
 } from './utils.js';
 import { createMap, setBaseStyle } from './map.js';
 import { addCountryLayers, applyVisitedCountries, partsOfCountry } from './countries.js';
+import { countryAt } from './geo.js';
 import { PIN, PIN_BODY, PIN_LIFT, pinSvg } from './markers.js';
 import { createRouteAnim } from './route.js';
 import { api } from './api.js';
+import { createUploadModal } from './upload-modal.js';
 
 /** 局部 $：detail-modal 模块内统一用 getElementById 取 DOM */
 function $(id) { return document.getElementById(id); }
@@ -86,7 +88,7 @@ function isCloseTarget(target) {
 }
 
 export function createDetailModal({
-  colorOf, worldGeoJSON, getPlaces, getTrips, getVisited, getStyleKey, onEdit, onDeleted, onMediaChanged,
+  colorOf, worldGeoJSON, getPlaces, getTrips, getVisited, getStyleKey, onEdit, onDeleted, onMediaChanged, onClosed,
 }) {
   const modal = document.getElementById('tm-modal');
   const panel = modal.querySelector('.modal__panel');
@@ -128,6 +130,11 @@ export function createDetailModal({
   /* 全屏预览状态 */
   let lbList = [];
   let lbIndex = 0;
+  /** 信息栏里的迷你地图实例（仅当媒体带 GPS 时创建，关闭/切换时销毁） */
+  let lbMap = null;
+
+  /* 「添加媒体」独立弹窗实例（详情头部「添加媒体」按钮打开，与编辑/删除并列） */
+  let uploadModal = null;
 
   /* =========================================================
    * 小地图
@@ -384,12 +391,16 @@ export function createDetailModal({
 
     const img = cell.querySelector('img');
     img?.addEventListener('error', () => {
-      img.src = './assets/placeholder-photo.svg';
+      img.src = './assets/sidebar-art.svg';
     });
 
     /* 单地点模式下，每个格子右上角挂一个删除按钮（行程模式下不提供，避免误删归属不明的媒体） */
     const del = mediaDeleteBtn(item);
     if (del) cell.appendChild(del);
+
+    /* 重命名按钮：同样仅单地点模式下提供 */
+    const rn = mediaRenameBtn(item);
+    if (rn) cell.appendChild(rn);
 
     cell.addEventListener('click', () => openLightbox(list, idx));
     return cell;
@@ -420,6 +431,65 @@ export function createDetailModal({
     return btn;
   }
 
+  /** 媒体重命名按钮：仅单地点详情出现。点击后在格子上浮一层输入框改名（写入 caption）。 */
+  function mediaRenameBtn(item) {
+    if (current?.kind !== 'place' || !item || !item.id) return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mgrid__renamebtn';
+    btn.title = '重命名';
+    btn.setAttribute('aria-label', '重命名媒体');
+    btn.innerHTML = '<svg class="ico ico--sm" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 9.5M4 20l1.2-4.3 10.3-10.3a2 2 0 0 1 2.8 0l1.8 1.8a2 2 0 0 1 0 2.8L9.3 18.8 5 20z"/></svg>';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      startRename(item, btn.parentElement);
+    });
+    return btn;
+  }
+
+  /**
+   * 在媒体格子上浮一层输入框，原地重命名（caption）。
+   * 回车 / 「保存」提交；Esc / 点遮罩取消。提交后刷新详情网格。
+   */
+  function startRename(item, cell) {
+    if (!cell || cell.querySelector('.mgrid__rename')) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'mgrid__rename';
+    const input = document.createElement('input');
+    input.className = 'mgrid__rename-input';
+    input.value = item.caption || '';
+    input.maxLength = 80;
+    input.placeholder = '输入名称';
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'mgrid__rename-go';
+    go.textContent = '保存';
+    overlay.append(input, go);
+
+    const cleanup = () => overlay.remove();
+    const commit = async () => {
+      const v = input.value.trim();
+      cleanup();
+      try {
+        await api.updateMedia(item.id, { caption: v });
+        toast('已重命名', 1500);
+        if (typeof onMediaChanged === 'function') onMediaChanged();
+      } catch (err) {
+        toast('重命名失败：' + (err.message || err), 2400);
+      }
+    };
+    go.addEventListener('click', commit);
+    overlay.addEventListener('click', (e) => { e.stopPropagation(); if (e.target === overlay) cleanup(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+    });
+    cell.appendChild(overlay);
+    input.focus();
+    input.select();
+  }
+
   function renderContent(view) {
     contentEl.innerHTML = '';
     const items = view.media.filter((m) => m.type === activeTab);
@@ -435,6 +505,8 @@ export function createDetailModal({
           + escapeHtml(m.text || '');
         const del = mediaDeleteBtn(m);
         if (del) { del.classList.add('mgrid__del--static'); card.appendChild(del); }
+        const rn = mediaRenameBtn(m);
+        if (rn) { rn.classList.add('mgrid__renamebtn--static'); card.appendChild(rn); }
         wrap.append(card);
       });
       contentEl.append(wrap);
@@ -445,9 +517,9 @@ export function createDetailModal({
     const grid = document.createElement('div');
     grid.className = 'mgrid';
     list.forEach((item, i) => {
-      // 首图占两格，形成朋友圈那种错落感（仅在图片数 ≥3 时启用）
-      const wide = i === 0 && list.length >= 3;
-      grid.append(mediaCell(item, list, i, { wide }));
+      // 瀑布流（CSS columns）下不再做"首图占两格"的特殊处理：
+      // 不等高的卡片本就交错，强行拉宽反而会破坏列平衡。
+      grid.append(mediaCell(item, list, i));
     });
     contentEl.append(grid);
   }
@@ -455,9 +527,94 @@ export function createDetailModal({
   /* =========================================================
    * 全屏预览
    * ========================================================= */
+  /** 把 EXIF 的 ISO 时间 "2023-05-01T14:30:00" 格式化为 "2023-05-01 14:30" */
+  function formatExifDate(s) {
+    if (!s) return '';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /**
+   * 把媒体元数据渲染进信息栏；返回是否有任何可展示的信息（决定是否显示信息栏）。
+   * 位置优先用 world.json 反查国家名（离线），再补经纬度文字 + 一张迷你线条地图（占位 div）。
+   */
+  function renderInfo(item) {
+    const infoEl = document.getElementById('tm-lb-info-scroll');
+    if (!infoEl) return false;
+    const rows = [];
+    if (item.takenAt) rows.push(['拍摄时间', escapeHtml(formatExifDate(item.takenAt))]);
+    const device = [item.cameraMake, item.cameraModel].filter(Boolean).join(' ');
+    if (device) {
+      rows.push(['拍摄设备', escapeHtml(device) + (item.lens ? `<span class="lb-sub">${escapeHtml(item.lens)}</span>` : '')]);
+    }
+    const params = [];
+    /* 旧数据里 focal/f_number 存的是 EXIF 原始浮点（5.960000038146973），展示端统一取整 */
+    if (item.focalLength) params.push(`${Math.round(item.focalLength * 10) / 10} mm`);
+    if (item.fNumber) params.push(`f/${Math.round(item.fNumber * 100) / 100}`);
+    if (item.iso) params.push(`ISO ${item.iso}`);
+    if (params.length) rows.push(['拍摄参数', escapeHtml(params.join(' · '))]);
+
+    let html = '';
+    if (rows.length) {
+      html += '<dl class="lb-meta">';
+      for (const [k, v] of rows) html += `<dt>${k}</dt><dd>${v}</dd>`;
+      html += '</dl>';
+    }
+    if (item.gpsLat && item.gpsLng) {
+      const feat = countryAt(item.gpsLng, item.gpsLat);
+      const cname = feat ? (feat.properties?.['name:zh-Hans'] || feat.properties?.name || '') : '';
+      html += '<div class="lb-loc"><span class="lb-loc__label">位置</span>'
+        + `<span class="lb-loc__val">${cname ? escapeHtml(cname) + ' · ' : ''}${item.gpsLat.toFixed(4)}°, ${item.gpsLng.toFixed(4)}°</span>`
+        + '<div class="lightbox__map" id="tm-lb-map"></div></div>';
+    } else if (!rows.length) {
+      html = '<p class="lb-empty">这张媒体没有可用的拍摄信息</p>';
+    }
+    infoEl.innerHTML = html;
+    return rows.length > 0 || !!(item.gpsLat && item.gpsLng);
+  }
+
+  /** 在信息栏的 #tm-lb-map 上画一张迷你线条地图 + 打点（positron 线描底图） */
+  function createLightboxMap(item) {
+    const el = document.getElementById('tm-lb-map');
+    if (!el || typeof maplibregl === 'undefined') return;
+    requestAnimationFrame(() => {
+      try {
+        const map = new maplibregl.Map({
+          container: el,
+          style: CONFIG.styles.positron,
+          center: [item.gpsLng, item.gpsLat],
+          /* zoom 11 = 城市级，位置只到"城市"粒度；提到 15 = 街区/楼栋级，让打点位置更精细
+             （用户诉求：要更精细的位置，不是更大的地图框）。地图框尺寸不变（仍 ~196px）。 */
+          zoom: 15,
+          attributionControl: false,
+          dragRotate: false, pitchWithRotate: false, scrollZoom: true, trackResize: false,
+        });
+        map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+        // 缩放按钮（+/-）：让用户在灯箱迷你地图上手动调节缩放级别（关掉指南针与复位，只留放大/缩小）。
+        // 滚轮缩放也已开启（scrollZoom:true），在地图上滚动滚轮即可缩放；按钮与滚轮两种方式并存。
+        map.addControl(new maplibregl.NavigationControl({ showZoom: true, showCompass: false, showReset: false }), 'top-right');
+        map.on('load', () => {
+          const pin = document.createElement('div');
+          pin.className = 'lb-pin';
+          new maplibregl.Marker({ element: pin }).setLngLat([item.gpsLng, item.gpsLat]).addTo(map);
+        });
+        lbMap = map;
+      } catch (e) {
+        warnOnce('lb-map', `迷你地图创建失败：${e.message}`);
+      }
+    });
+  }
+
+  function destroyLightboxMap() {
+    if (lbMap) { try { lbMap.remove(); } catch (_) { /* 忽略 */ } lbMap = null; }
+  }
+
   function renderLightbox() {
     const item = lbList[lbIndex];
     if (!item) return;
+    destroyLightboxMap();
     lbStage.innerHTML = '';
     lbStage.classList.remove('is-switching');
     void lbStage.offsetWidth;                 // 重排以重播动画
@@ -473,7 +630,7 @@ export function createDetailModal({
       // 视频兜底：取源失败时退化为封面图，避免出现"黑框"
       video.addEventListener('error', () => {
         const img = document.createElement('img');
-        img.src = item.poster || './assets/placeholder-photo.svg';
+        img.src = item.poster || './assets/sidebar-art.svg';
         img.alt = item.caption || '';
         lbStage.innerHTML = '';
         lbStage.append(img);
@@ -485,10 +642,16 @@ export function createDetailModal({
       img.alt = item.caption || '';
       img.referrerPolicy = 'no-referrer';
       img.addEventListener('error', () => {
-        img.src = './assets/placeholder-photo.svg';
+        img.src = './assets/sidebar-art.svg';
       }, { once: true });
       lbStage.append(img);
     }
+
+    // 信息栏常驻：有元数据展示明细，没有则显示占位提示（保证功能可被发现）
+    renderInfo(item);
+    const infoWrap = document.getElementById('tm-lb-info');
+    if (infoWrap) infoWrap.hidden = false;
+    if (item.gpsLat && item.gpsLng) createLightboxMap(item);
 
     lbCounter.textContent = lbList.length > 1 ? `${lbIndex + 1} / ${lbList.length}` : '';
     lbCaption.textContent = item.caption || '';
@@ -507,9 +670,12 @@ export function createDetailModal({
 
   function closeLightbox() {
     if (lightbox.hidden) return;
+    destroyLightboxMap();
     lightbox.hidden = true;
     lbStage.innerHTML = '';
     lbList = [];
+    const infoSc = document.getElementById('tm-lb-info-scroll');
+    if (infoSc) infoSc.innerHTML = '';
   }
 
   function stepLightbox(delta) {
@@ -632,17 +798,13 @@ export function createDetailModal({
     dotEl.style.background = view.color;
     subEl.textContent = view.sub;
     badgeEl.textContent = view.badge;
-    // 「编辑」仅对单地点有效（行程编辑是另一回事，未开放）
-    if (editBtn) editBtn.hidden = view.kind !== 'place';
+    // 「编辑」对单地点与行程都有效（行程走编辑行程弹窗，增删足迹点）
+    if (editBtn) editBtn.hidden = (view.kind !== 'place' && view.kind !== 'trip');
     // 「删除」同样仅对单地点有效
     if (deleteBtn) deleteBtn.hidden = view.kind !== 'place';
-    // 「添加媒体」：仅单地点详情可见；每次打开都收起面板、清空状态
+    // 「添加媒体」：仅单地点详情可见（按钮已移到头部，与编辑/删除并列）
     const addBtn = $('tm-modal-addbtn');
     if (addBtn) addBtn.hidden = view.kind !== 'place';
-    const panel = $('tm-modal-addpanel');
-    if (panel) panel.hidden = true;
-    const statusEl = $('tm-modal-addstatus');
-    if (statusEl) statusEl.textContent = '';
 
     renderTabs(view);
     renderContent(view);
@@ -705,6 +867,9 @@ export function createDetailModal({
       modal.classList.remove('is-closing');
       document.body.classList.remove('is-modal-open');
       current = null;
+      /* 弹窗完全关闭后通知外部（主图用它在 closeLightbox 之后把激活图钉
+         恢复成普通大小——见 main.js 的 onClosed → markers.setActive(null)） */
+      if (typeof onClosed === 'function') onClosed();
       if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
     };
     // 等退场动画结束（尊重 prefers-reduced-motion）
@@ -716,72 +881,18 @@ export function createDetailModal({
   /* =========================================================
    * 详情页：补充上传媒体（图片 / 视频 / 文本）
    * ---------------------------------------------------------
-   * 只针对「单地点」详情：把媒体挂到 current.ref.id 下。
-   * 上传成功后回调 onMediaChanged（main 接到 refreshData），弹窗会用
-   * 新数据自动 refresh，不必再绕回「编辑足迹」弹窗。
+   * 走独立的「添加媒体」弹窗（upload-modal.js），由头部「添加媒体」按钮打开。
+   * 弹窗自己负责多选 / 重命名 / 进度条，上传成功后通过 onAdded 回调刷新本弹窗。
    * ========================================================= */
-  function setAddStatus(msg, isError = false) {
-    const el = $('tm-modal-addstatus');
-    if (!el) return;
-    el.textContent = msg || '';
-    el.classList.toggle('is-error', !!isError);
-  }
-
-  async function uploadPickedFiles() {
-    const input = $('tm-modal-file');
-    const files = Array.from(input?.files || []);
-    if (!files.length) { setAddStatus('请先选择图片或视频', true); return; }
-    const id = current?.ref?.id;
-    if (!id) return;
-    const caption = ($('tm-modal-cap1')?.value || '').trim();
-    setAddStatus('正在上传…');
-    try {
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('placeId', id);
-        fd.append('file', file);
-        fd.append('caption', caption);
-        await api.uploadMedia(fd);
-      }
-      setAddStatus('已上传 ✓');
-      toast('已添加媒体', 2000);
-      if (input) input.value = '';
-      const cap1 = $('tm-modal-cap1'); if (cap1) cap1.value = '';
-      if (typeof onMediaChanged === 'function') onMediaChanged();
-    } catch (e) {
-      setAddStatus('上传失败：' + (e.message || e), true);
+  function openUploadModal() {
+    const ref = current?.ref;
+    if (current?.kind !== 'place' || !ref) return;
+    if (!uploadModal) {
+      uploadModal = createUploadModal({
+        onAdded: () => { if (typeof onMediaChanged === 'function') onMediaChanged(); },
+      });
     }
-  }
-
-  async function addTextNote() {
-    const ta = $('tm-modal-text');
-    const text = (ta?.value || '').trim();
-    if (!text) { setAddStatus('请先输入文字内容', true); return; }
-    const id = current?.ref?.id;
-    if (!id) return;
-    const caption = ($('tm-modal-cap2')?.value || '').trim();
-    setAddStatus('正在保存文字…');
-    try {
-      const fd = new FormData();
-      fd.append('placeId', id);
-      fd.append('kind', 'text');
-      fd.append('text_body', text);
-      fd.append('caption', caption);
-      await api.uploadMedia(fd);
-      setAddStatus('已添加 ✓');
-      toast('已添加文字笔记', 2000);
-      if (ta) ta.value = '';
-      const cap2 = $('tm-modal-cap2'); if (cap2) cap2.value = '';
-      if (typeof onMediaChanged === 'function') onMediaChanged();
-    } catch (e) {
-      setAddStatus('保存失败：' + (e.message || e), true);
-    }
-  }
-
-  function toggleAddPanel() {
-    const panel = $('tm-modal-addpanel');
-    if (!panel) return;
-    panel.hidden = !panel.hidden;
+    uploadModal.open(ref.id, current?.name);
   }
 
   /* =========================================================
@@ -790,15 +901,14 @@ export function createDetailModal({
   bodyEl.addEventListener('scroll', onScroll, { passive: true });
   closeBtn.addEventListener('click', close);
 
-  /* 详情页：补充上传媒体（仅单地点模式可用，按钮可见性由 mount 控制） */
-  $('tm-modal-addbtn')?.addEventListener('click', toggleAddPanel);
-  $('tm-modal-upload')?.addEventListener('click', uploadPickedFiles);
-  $('tm-modal-addtext')?.addEventListener('click', addTextNote);
+  /* 详情页：头部「添加媒体」按钮（仅单地点模式可用，可见性由 mount 控制） */
+  $('tm-modal-addbtn')?.addEventListener('click', openUploadModal);
 
-  /* 编辑当前地点：先关详情弹窗，再把地点交给新增/编辑弹窗 */
+  /* 编辑当前内容：地点交给新增/编辑弹窗，行程交给编辑行程弹窗（main.js 的 onEdit 按 places 数组分流） */
   editBtn?.addEventListener('click', () => {
     const ref = current?.ref;
-    if (current?.kind !== 'place' || !ref) return;
+    if (!ref) return;
+    if (current?.kind !== 'place' && current?.kind !== 'trip') return;
     close();
     if (typeof onEdit === 'function') onEdit(ref);
   });

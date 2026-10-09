@@ -294,7 +294,7 @@ function yearsPanel(m) {
     return `
       <section class="panel panel--years">
         <div class="panel__head"><h3 class="panel__title">足迹年轮</h3></div>
-        <div class="panel__body"><p class="muted">还没有带年份的足迹 —— 在 places.json 里补上 date 字段就能看到年轮。</p></div>
+        <div class="panel__body"><p class="muted">还没有带年份的足迹 —— 新增足迹时填好出发日期，就会在这里长出年轮。</p></div>
       </section>`;
   }
 

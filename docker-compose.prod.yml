@@ -1,0 +1,44 @@
+# =========================================================
+# docker-compose.prod.yml · 部署版（从 Docker Hub 拉取已构建镜像，无需源码）
+# 用法:
+#   1) 复制 .env.example 为 .env，填好 DH_USER / ADMIN_PASSWORD
+#   2) docker compose -f docker-compose.prod.yml pull
+#   3) docker compose -f docker-compose.prod.yml up -d
+# 更新: 换机器上重新执行 pull && up -d 即可（镜像已含最新代码）
+# 注意: MinIO 默认密码仅适合本地测试；正式部署请改掉 MINIO_ROOT_PASSWORD / MINIO_SECRET_KEY。
+# =========================================================
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: travelmap-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: travelmap
+      MINIO_ROOT_PASSWORD: changeme-minio-password
+    ports:
+      - "9001:9001"
+    volumes:
+      - ${MINIO_DATA_DIR:-./minio-data}:/data
+    restart: unless-stopped
+
+  travelmap:
+    image: ${DH_USER:-youruser}/travelmap:latest
+    container_name: travelmap
+    depends_on:
+      - minio
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATA_DIR=/data
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 里设置 ADMIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=travelmap
+      - MINIO_SECRET_KEY=changeme-minio-password
+      - MINIO_BUCKET=travelmap
+    volumes:
+      - ${APP_DATA_DIR:-./data}:/data
+    restart: unless-stopped

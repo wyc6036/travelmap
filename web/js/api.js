@@ -54,6 +54,37 @@ export const api = {
   /* 数据（与 places.json 同构，normalize 直接吃） */
   getData: () => req('/data'),
 
+  /* 备份导出 / 导入（zip 压缩包）
+     导出：服务端直接吐 zip 二进制，这里手动触发浏览器下载（req 默认按 JSON 处理不适用）。
+     导入：带二次确认后由设置页上传 FormData。 */
+  exportZip: () => fetch(BASE + '/export-zip', {
+    method: 'GET', credentials: 'same-origin', cache: 'no-store',
+  }).then(async (res) => {
+    if (res.status === 401) { const e = new Error('unauthorized'); e.status = 401; throw e; }
+    if (!res.ok) {
+      let msg = `导出失败（${res.status}）`;
+      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (_) { /* 非 JSON */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+    a.href = url;
+    a.download = m ? m[1] : 'travelmap-backup.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return { ok: true };
+  }),
+  importZip: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return req('/import-zip', { method: 'POST', body: fd });
+  },
+
   /* 地点 */
   createPlace: (place) => req('/places', json(place)),
   updatePlace: (id, place) => req(`/places/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(place) }),
@@ -70,6 +101,23 @@ export const api = {
   /* 媒体上传：传入 FormData（可含 file，或纯文字 text_body） */
   uploadMedia: (formData) => req('/upload', { method: 'POST', body: formData }),
 
+  /* 批量 GPS 归档：分析未归类照片（逐张逆地理编码 + 聚类） */
+  gpsAnalyze: () => req('/gps/analyze', json({})),
+  /* 批量 GPS 归档：按确认后的方案落库（新建地点 / 归入已有 / 跳过） */
+  gpsApply: (plan) => req('/gps/apply', json(plan || {})),
+
   /* 删除单条媒体（按 id） */
   deleteMedia: (id) => req(`/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /* 更新单条媒体（重命名 caption / 补 taken_at 等） */
+  updateMedia: (id, body) => req(`/media/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body || {}) }),
+
+  /* 用户资料：头像 / 用户名 */
+  getProfile: () => req('/profile'),
+  putProfile: (patch) => req('/profile', { method: 'PUT', body: JSON.stringify(patch || {}) }),
+  uploadAvatar: (formData) => req('/profile/avatar', { method: 'POST', body: formData }),
+
+  /* 通用 meta 读写（设置页用：高德逆地理编码 Key 等） */
+  getMeta: (key) => req(`/meta/${encodeURIComponent(key)}`),
+  setMeta: (key, value) => req('/meta', json({ key, value })),
 };

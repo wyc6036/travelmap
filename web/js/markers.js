@@ -141,6 +141,10 @@ export function createMarkerLayer(map, { colorOf, onSelect }) {
   }
 
   function render(places, extra) {
+    /* 记住当前选中态：15 秒轮询会整批重建图钉（clear 把 activeId 一并清掉），
+       若详情弹窗还开着，选中的钉子应继续保持放大，而不是突然缩回去。
+       关闭弹窗时 onClosed → setActive(null) 才是唯一的"缩回"时机。 */
+    const keepActiveId = activeId;
     clear();
 
     for (const place of places) {
@@ -177,6 +181,7 @@ export function createMarkerLayer(map, { colorOf, onSelect }) {
       entries.push({ place, el, marker, popup });
     }
 
+    if (keepActiveId) setActive(keepActiveId);
     updateVisibility(extra);
   }
 

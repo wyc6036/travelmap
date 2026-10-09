@@ -255,6 +255,9 @@ export function collectVisited(places) {
     place.countryFeature = owner;
     place.countryZh = owner.properties.zh || owner.properties.name;
 
+    // 「目的地」= 想去但还没去过，只作为愿望清单，不对该国家/地区上色
+    if (place.type === '目的地') continue;
+
     if (!visited.has(id)) visited.set(id, { feature: owner, places: [] });
     visited.get(id).places.push(place);
   }

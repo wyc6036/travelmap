@@ -144,6 +144,8 @@
 
 /* 表单控件 */
 .form-row { display: flex; flex-direction: column; gap: 6px; }
+/* 类型为「目的地」时隐藏媒体/笔记类表单项（见 upload.js syncTypeVisibility） */
+.form-row.is-hidden { display: none !important; }
 .form-row--2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-label { font-size: var(--fs-sm); color: var(--ink-2); font-weight: 500; }
 .form-input {
@@ -165,6 +167,12 @@
 textarea.form-input { resize: vertical; min-height: 52px; line-height: 1.5; }
 .form-status { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); min-height: 1em; }
 .form-status.is-error { color: var(--danger); }
+
+/* 个人资料弹窗：头像 + 更换按钮 横向排布 */
+.user-row { flex-direction: row; align-items: center; gap: 16px; }
+.user-row__side { display: flex; flex-direction: column; gap: 6px; }
+.user-row__hint { margin: 0; font-size: var(--fs-sm); color: var(--ink-3, #9A9287); }
+.btn--sm { padding: 6px 12px; font-size: var(--fs-sm); border-radius: var(--r-sm); }
 
 /* 新建行程：地点勾选列表 */
 .tm-trip-list {
@@ -203,9 +211,17 @@ textarea.form-input { resize: vertical; min-height: 52px; line-height: 1.5; }
   .form-row--2 { grid-template-columns: 1fr; }
 }
 
-/* ---------- 详情弹窗「编辑」按钮 ---------- */
-.modal__edit {
+/* ---------- 详情弹窗头部按钮组 ----------
+   添加媒体 / 编辑 / 删除 三个按钮包成右侧按钮组（.modal__actions），
+   用 margin-left:auto 整体推到右边、彼此紧挨；不再让单个按钮各自 margin-left:auto
+   导致「添加媒体」孤悬在中间。 */
+.modal__actions {
   margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* 详情弹窗「编辑」按钮 */
+.modal__edit {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 11px; border-radius: 999px;
   border: 1px solid var(--line-2); background: var(--surface-2);
@@ -217,7 +233,6 @@ textarea.form-input { resize: vertical; min-height: 52px; line-height: 1.5; }
 
 /* 详情弹窗「删除」按钮：与编辑按钮同款胶囊，但用警示红，强调破坏性操作 */
 .modal__delete {
-  margin-left: 8px;
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 11px; border-radius: 999px;
   border: 1px solid var(--danger-line, #e7c3c0); background: var(--surface-2);
@@ -226,6 +241,106 @@ textarea.form-input { resize: vertical; min-height: 52px; line-height: 1.5; }
 }
 .modal__delete:hover { background: var(--danger-bg, #fbeceA); color: var(--danger-strong, #a83a24); border-color: var(--danger-strong, #a83a24); }
 .modal__delete .ico { width: 15px; height: 15px; }
+
+/* 详情弹窗「添加媒体」按钮：与编辑 / 删除并列，主色胶囊，强调"新增"动作 */
+.modal__add {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--primary, #7C9CC3);
+  background: var(--primary-soft, #DDE5F0);
+  color: var(--primary-ink, #4E6E96); font-size: var(--fs-sm); cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.modal__add:hover { background: var(--primary, #7C9CC3); color: #fff; border-color: var(--primary, #7C9CC3); }
+.modal__add .ico { width: 15px; height: 15px; }
+
+/* 媒体格子的「重命名」按钮（仅单地点详情）：铅笔图标，位于删除键左侧 */
+.mgrid__renamebtn {
+  position: absolute; top: 8px; right: 38px; z-index: 10;
+  width: 24px; height: 24px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: rgba(20, 24, 30, .5); color: #fff;
+  cursor: pointer; backdrop-filter: blur(4px);
+  transition: background .15s, color .15s;
+}
+.mgrid__renamebtn:hover { background: var(--primary, #7C9CC3); }
+.mgrid__renamebtn .ico { width: 18px; height: 18px; stroke-width: 1.5; display: block; }
+/* 文字卡片上的重命名键（常驻可见） */
+.mgrid__renamebtn--static { top: 8px; right: 38px; background: rgba(20, 24, 30, .12); color: var(--ink-2); }
+.mgrid__renamebtn--static:hover { background: var(--primary, #7C9CC3); color: #fff; }
+
+/* 格子上浮的重命名输入框层 */
+.mgrid__rename {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; gap: 6px; align-items: center; padding: 8px;
+  background: rgba(20, 24, 30, .55);
+  backdrop-filter: blur(3px);
+}
+.mgrid__rename-input {
+  flex: 1; min-width: 0;
+  padding: 6px 9px; border: 0; border-radius: var(--r-xs);
+  font-size: var(--fs-sm); color: var(--ink); background: #fff; outline: none;
+}
+.mgrid__rename-go {
+  flex: none; padding: 6px 10px; border: 0; border-radius: var(--r-xs);
+  background: var(--primary, #7C9CC3); color: #fff; font-size: var(--fs-sm); cursor: pointer;
+}
+.mgrid__rename-go:hover { background: var(--primary-dark, #6788B0); }
+
+/* ---------- 添加媒体弹窗（upload-modal.js） ---------- */
+.upload__drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 24px 16px; border: 1.5px dashed var(--line-2, #E2D8C8); border-radius: var(--r-md);
+  background: var(--surface-2, #FCF9F2); color: var(--ink-2, #6B655C);
+  cursor: pointer; text-align: center;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.upload__drop:hover, .upload__drop.is-drag {
+  border-color: var(--primary, #7C9CC3);
+  background: var(--primary-tint, #EEF3F9);
+  color: var(--primary-ink, #4E6E96);
+}
+.upload__drop.is-busy { opacity: .6; cursor: default; }
+.upload__drop-ico { width: 30px; height: 30px; }
+.upload__drop-text { margin: 0; font-size: var(--fs-base); font-weight: 500; }
+.upload__drop-hint { margin: 0; font-size: var(--fs-sm); color: var(--ink-3, #9A9287); }
+
+.upload__list { display: flex; flex-direction: column; gap: 8px; }
+.upload__empty { margin: 0; padding: 10px; text-align: center; color: var(--ink-3, #9A9287); font-size: var(--fs-sm); }
+.upload__row {
+  display: grid; grid-template-columns: 52px 1fr auto auto; gap: 10px; align-items: center;
+  padding: 8px; border: 1px solid var(--line-2, #E2D8C8); border-radius: var(--r-sm);
+  background: var(--surface-2, #FCF9F2);
+}
+.upload__prev {
+  width: 52px; height: 52px; border-radius: var(--r-xs);
+  overflow: hidden; background: var(--surface-3, #F4EEE4); display: grid; place-items: center;
+}
+.upload__prev img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.upload__prev .ico { width: 22px; height: 22px; color: var(--ink-3, #9A9287); }
+.upload__name { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.upload__name-input { width: 100%; padding: 7px 10px; }
+.upload__meta { font-size: var(--fs-xs); color: var(--ink-3, #9A9287); }
+.upload__st { font-size: var(--fs-sm); color: var(--ink-2, #6B655C); white-space: nowrap; min-width: 4.5em; text-align: right; }
+.upload__row[data-status="done"] .upload__st { color: #3a8f5b; }
+.upload__row[data-status="done"] .upload__st::after { content: ' ✓'; }
+.upload__row[data-status="error"] .upload__st { color: var(--danger, #C9705C); }
+.upload__row[data-status="uploading"] .upload__st { color: var(--primary-ink, #4E6E96); }
+.upload__rm {
+  width: 26px; height: 26px; border: 0; border-radius: 50%;
+  background: rgba(20, 24, 30, .1); color: var(--ink-2, #6B655C);
+  cursor: pointer; display: grid; place-items: center;
+}
+.upload__rm:hover { background: var(--danger, #C9705C); color: #fff; }
+.upload__rm .ico { width: 15px; height: 15px; }
+
+.upload__progress { display: flex; align-items: center; gap: 10px; }
+.upload__bar { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-3, #F4EEE4); overflow: hidden; }
+.upload__bar i { display: block; height: 100%; width: 0%; background: var(--primary, #7C9CC3); border-radius: 999px; transition: width .2s var(--ease); }
+.upload__progress-label { font-size: var(--fs-sm); color: var(--ink-3, #9A9287); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.upload__note { display: flex; flex-direction: column; gap: 6px; }
 
 /* ---------- 编辑模式：已有媒体网格 ---------- */
 .tm-exist { display: flex; flex-direction: column; gap: 8px; }

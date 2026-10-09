@@ -4,7 +4,7 @@
  * 完全复用 Ref_Globe 的数据契约，并向前兼容扩展：
  *   - normalize()  兼容 coord / 坐标 / lngLat / latLng / position 等写法
  *   - 未知字段一律保留在 place.raw 上，不丢数据
- *   - 10 秒轮询 places.json，内容变化才重建（沿用 Ref_Globe 的 lastRaw 比对策略）
+ *   - 每 15 秒轮询 /api/data（CONFIG.pollIntervalMs），内容变化才重建（沿用 Ref_Globe 的 lastRaw 比对策略）
  *   - media[] 归一化，缺省时按地点生成稳定的占位多媒体（便于后续平滑替换真实存储）
  */
 
@@ -65,15 +65,35 @@ function normalizeMediaItem(item, place, index) {
   const text = pick(asObject, ['text', 'content', '正文', '内容', 'body'], '');
   const poster = pick(asObject, ['poster', '封面', 'thumb', 'thumbnail'], '');
 
+  /* 后端（/api/data）会带来 EXIF 元数据，必须逐字段透传——
+     ⚠️ 曾在这里只挑 type/url/caption/poster 重建对象，把拍摄时间/设备/参数/GPS
+     整体丢掉，导致灯箱信息栏永远显示"没有可用的拍摄信息"（DB 与 API 里都有）。 */
+  const meta = {
+    takenAt: String(pick(asObject, ['takenAt', 'taken_at'], '') || ''),
+    cameraMake: String(pick(asObject, ['cameraMake', 'camera_make'], '') || ''),
+    cameraModel: String(pick(asObject, ['cameraModel', 'camera_model'], '') || ''),
+    lens: String(pick(asObject, ['lens', '镜头'], '') || ''),
+    gpsLat: Number(pick(asObject, ['gpsLat', 'gps_lat'], 0)) || 0,
+    gpsLng: Number(pick(asObject, ['gpsLng', 'gps_lng'], 0)) || 0,
+    focalLength: Number(pick(asObject, ['focalLength', 'focal_length'], 0)) || 0,
+    fNumber: Number(pick(asObject, ['fNumber', 'f_number'], 0)) || 0,
+    iso: Number(pick(asObject, ['iso'], 0)) || 0,
+  };
+
+  /* id：后端给了真实 id 必须保留（删除/重命名接口靠它寻址），
+     纯静态数据没有 id 时才退回按位置的合成 id。 */
+  const id = String(pick(asObject, ['id'], `m${index}`) || `m${index}`);
+
   if (type === 'text') {
     const body = text || caption || url;
     if (!body) return null;
-    return { type, text: String(body), caption: String(caption || ''), raw: item, id: `m${index}` };
+    return { type, text: String(body), caption: String(caption || ''), raw: item, id, ...meta };
   }
   if (!url) return null;
   return {
     type, url: String(url), caption: String(caption || ''),
-    poster: poster ? String(poster) : '', raw: item, id: `m${index}`,
+    poster: poster ? String(poster) : '', raw: item, id,
+    ...meta,
   };
 }
 
@@ -236,7 +256,7 @@ function normalizeTrips(rawTrips, places) {
  * ========================================================= */
 let lastRaw = null;
 
-/** 内置兜底数据：places.json 读取失败（首次）时使用 */
+/** 内置兜底数据：/api/data 首次读取失败时（如未登录 / 网络异常）使用 */
 const FALLBACK = {
   types: { 居住: '#4E7398', 旅行: '#C86E4A', 目的地: '#7E6C9C' },
   places: [
@@ -248,7 +268,7 @@ const FALLBACK = {
 };
 
 /**
- * 读取一次 places.json。
+ * 读取一次 /api/data（首次失败才回退到内置兜底数据）。
  * @param {boolean} isFirst 是否首次加载（首次失败才回退到内置数据）
  * @returns {Promise<{data:object, changed:boolean, fromFallback:boolean}>}
  */
@@ -264,7 +284,7 @@ export async function loadPlaces(isFirst = false) {
   } catch (err) {
     if (err.status === 401) throw err; // 冒泡给上层（main.js）去弹登录
     if (!isFirst) return { data: null, changed: false, fromFallback: false };
-    warnOnce('places-fallback', `读取数据失败，已使用内置兜底数据：${err.message}`);
+    warnOnce('data-fallback', `读取数据失败，已使用内置兜底数据：${err.message}`);
     raw = JSON.stringify(FALLBACK);
     fromFallback = true;
   }
@@ -276,7 +296,7 @@ export async function loadPlaces(isFirst = false) {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    warnOnce('places-json', `places.json 解析失败，已忽略本次更新：${err.message}`);
+    warnOnce('data-parse', `数据解析失败，已忽略本次更新：${err.message}`);
     return { data: null, changed: false, fromFallback };
   }
 

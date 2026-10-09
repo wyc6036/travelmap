@@ -23,10 +23,12 @@ import { createLegend } from './legend.js';
 import { createDetailModal } from './detail-modal.js';
 import { createUI } from './ui.js';
 import { $$, warnOnce, toast, rafThrottle } from './utils.js';
+import { api } from './api.js';
 import { initAuth, showLogin } from './auth.js';
 import { initSetup } from './setup.js';
 import { createAddPlace } from './upload.js';
 import { createAddTrip } from './trip-edit.js';
+import { createArchive } from './archive.js';
 
 /* =========================================================
  * 启动状态
@@ -173,6 +175,105 @@ async function refreshData() {
   } catch (err) {
     if (err && err.status === 401) showLogin();
   }
+}
+
+/* =========================================================
+ * 用户资料（侧栏头像 / 用户名 → 弹窗编辑）
+ * ========================================================= */
+let userProfile = null; // 当前资料，弹窗取用
+
+/** 把资料渲染回侧栏：用户名 + 头像（有 avatar 则盖掉默认 SVG）。 */
+function renderUserHead(profile) {
+  if (!profile) return;
+  userProfile = profile;
+  const hi = document.getElementById('tm-user-hi');
+  const avatar = document.getElementById('tm-user-avatar');
+  if (hi) hi.textContent = `Hi, ${profile.name || 'Coral'}`;
+  if (avatar) {
+    if (profile.avatar) avatar.innerHTML = `<img src="${profile.avatar}" alt="">`;
+    /* 没有 avatar 时保留 HTML 里默认的那枚生成式 SVG，不动它 */
+  }
+}
+
+/** 拉取资料并渲染侧栏（独立于地点数据，尽早调用）。 */
+async function loadProfile() {
+  try {
+    const profile = await api.getProfile();
+    renderUserHead(profile);
+  } catch (err) {
+    if (err && err.status === 401) return; // 稍后由登录遮罩处理
+    warnOnce('profile', `读取用户资料失败：${err.message}`);
+  }
+}
+
+/** 绑定「点侧栏 → 弹窗」「换头像」「保存用户名」。 */
+function initUserProfile() {
+  const openBtn = document.getElementById('tm-user-open');
+  const modal = document.getElementById('tm-user-modal');
+  const form = document.getElementById('tm-user-form');
+  const nameInput = document.getElementById('tm-user-name');
+  const avInput = document.getElementById('tm-user-avinput');
+  const changeBtn = document.getElementById('tm-user-change-av');
+  const modalAvatar = document.getElementById('tm-user-modal-avatar');
+  const status = document.getElementById('tm-user-status');
+  if (!openBtn || !modal || !form) return;
+
+  const defaultAvatarHTML = modalAvatar ? modalAvatar.innerHTML : '';
+  let pendingAvatar = null; // { file, url } 或 null
+
+  function openModal() {
+    const cur = userProfile || { name: 'Coral', avatar: '' };
+    nameInput.value = cur.name || '';
+    pendingAvatar = null;
+    if (modalAvatar) {
+      modalAvatar.innerHTML = cur.avatar ? `<img src="${cur.avatar}" alt="">` : defaultAvatarHTML;
+    }
+    status.textContent = '';
+    status.classList.remove('is-error');
+    modal.hidden = false;
+  }
+  function closeModal() { modal.hidden = true; }
+
+  openBtn.addEventListener('click', openModal);
+  modal.querySelectorAll('[data-close="1"]').forEach((el) => el.addEventListener('click', closeModal));
+
+  changeBtn?.addEventListener('click', () => avInput && avInput.click());
+  avInput?.addEventListener('change', () => {
+    const file = avInput.files && avInput.files[0];
+    if (!file || !modalAvatar) return;
+    if (pendingAvatar && pendingAvatar.url) URL.revokeObjectURL(pendingAvatar.url);
+    const url = URL.createObjectURL(file);
+    pendingAvatar = { file, url };
+    modalAvatar.innerHTML = `<img src="${url}" alt="">`;
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = (nameInput.value || '').trim() || 'Coral';
+    status.textContent = '保存中…';
+    status.classList.remove('is-error');
+    try {
+      let merged = { ...(userProfile || {}), name };
+      const r = await api.putProfile({ name });
+      if (r && r.name) merged.name = r.name;
+
+      if (pendingAvatar && pendingAvatar.file) {
+        const fd = new FormData();
+        fd.append('file', pendingAvatar.file);
+        const ar = await api.uploadAvatar(fd);
+        if (ar && ar.url) merged.avatar = ar.url;
+        if (ar && ar.profile && ar.profile.name) merged.name = ar.profile.name;
+        if (pendingAvatar.url) URL.revokeObjectURL(pendingAvatar.url);
+        pendingAvatar = null;
+      }
+      renderUserHead(merged);
+      status.textContent = '已保存';
+      setTimeout(closeModal, 600);
+    } catch (err) {
+      status.textContent = err.message || '保存失败';
+      status.classList.add('is-error');
+    }
+  });
 }
 
 /* =========================================================
@@ -347,6 +448,7 @@ async function boot() {
     onOpenDetail: (place) => selectPlace(place, { openModal: true, fly: false }),
     onAddPlace: () => addPlace?.open(),
     onAddTrip: () => addTrip?.open(),
+    onOpenArchive: () => archive?.open(),
     /* 行程分组头的标题被点开：直接开媒体弹窗，路线动画跑在弹窗上半部的小地图里。
        ⚠️ app.modal 是在 createUI **之后**才建的（见下面 createDetailModal），
           所以这里必须惰性取用，不能在参数里直接引用 app.modal.openTrip。 */
@@ -381,12 +483,19 @@ async function boot() {
     getTrips: () => app.trips,
     getVisited: () => app.visited,
     getStyleKey: () => app.styleKey,
-    /* 详情弹窗「编辑」→ 交给新增/编辑弹窗（addPlace 在下方创建，点击时才取用，无 TDZ 问题） */
-    onEdit: (place) => { addPlace?.edit(place); },
+    /* 详情弹窗「编辑」→ 地点交给新增/编辑弹窗，行程交给编辑行程弹窗（按 places 数组区分）。
+       addPlace / addTrip 都在下方创建，点击时才取用，无 TDZ 问题。 */
+    onEdit: (item) => {
+      if (item && Array.isArray(item.places)) addTrip?.edit(item);
+      else addPlace?.edit(item);
+    },
     /* 详情弹窗「删除」→ 删完主动刷新一次地图打点（不必等 15 秒轮询） */
     onDeleted: () => refreshData(),
     /* 详情弹窗内「补充上传 / 删除单条媒体」→ 上传/删除后主动刷新（弹窗会跟着 refresh） */
     onMediaChanged: () => refreshData(),
+    /* 详情弹窗关闭 → 取消图钉的选中放大（is-active 只在查看期间保留，
+       否则看过的那个钉子会一直停在 1.3 倍大小不回去） */
+    onClosed: () => { app.markers?.setActive(null); },
   });
 
   /* ---- 新增 / 上传（记录新足迹 / 照片 / 视频 / 笔记） ---- */
@@ -395,6 +504,9 @@ async function boot() {
   /* ---- 新建行程组（多地点行程） ---- */
   const addTrip = createAddTrip({ getPlaces: () => app.places, onSaved: refreshData });
 
+  /* ---- 批量照片归类（按 GPS 自动建地点） ---- */
+  const archive = createArchive({ onSaved: refreshData });
+
   /* ---- 鉴权：未设密码则开放，否则弹登录遮罩，登录成功才继续 ---- */
   const authed = await initAuth();
   if (!authed) return; // 停在登录遮罩，不加载数据
@@ -402,6 +514,10 @@ async function boot() {
   /* ---- 首次配置向导：首进时选择媒体存储方式（内置 MinIO / 本地目录） ---- */
   const setupOk = await initSetup();
   if (!setupOk) return; // 停在配置遮罩，不加载数据
+
+  /* ---- 用户资料：拉取并渲染侧栏，绑定编辑弹窗 ---- */
+  initUserProfile();
+  await loadProfile();
 
   /* ---- 数据 ---- */
   let first;
@@ -422,6 +538,8 @@ async function boot() {
   app.ui.renderSettingsView({
     styleKey: app.styleKey,
     onStyleChange: (key) => { app.styleKey = key; setBaseStyle(app.map, key); },
+    /* 导入备份完成后立刻重新拉数据（否则要等 15 秒轮询才看到恢复的内容） */
+    onDataReload: () => { refreshData(); },
   });
 
   bindControls();
