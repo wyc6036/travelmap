@@ -44,10 +44,12 @@ travelmap/
 │   ├── seed/places.json     # 初始种子（38 个示例地点）；首次启动自动导入
 │   ├── travelmap.db*        # 运行时生成的 SQLite 库（gitignore 忽略）
 │   └── media/               # 本地目录模式下上传的媒体（gitignore 忽略）
-├── Dockerfile               # 两阶段构建：build 装依赖并编译原生模块 → runtime 仅留 ffmpeg
-├── docker-compose.yml       # travelmap + 内置 minio 两服务；数据绑定挂载 ./data、./minio-data
+├── Dockerfile               # 两阶段构建：build 装依赖并编译原生模块 → runtime 仅留 ffmpeg；含可选 ARG NODE_BASE
+├── docker-compose.yml       # 本地构建版（build: .）：travelmap + 内置 minio 两服务；数据绑定挂载 ./data、./minio-data
+├── docker-compose.prod.yml  # 部署版：从 Docker Hub 拉取已构建镜像（无需源码）；用法见「四、从 Docker Hub 拉取部署」
+├── publish.sh               # 构建并推送镜像到 Docker Hub（多架构；国内污染时可退化为单架构，见「五、发布新版镜像」）
 ├── .dockerignore            # 忽略 node_modules / *.db / data/media（seed 仍打进镜像）
-├── .env.example             # 可配置 MINIO_DATA_DIR / APP_DATA_DIR 等
+├── .env.example             # 可配置 MINIO_DATA_DIR / APP_DATA_DIR / DH_USER / ADMIN_PASSWORD 等
 └── .gitignore
 ```
 
@@ -62,7 +64,7 @@ travelmap/
 - 安装了 **Docker + Docker Compose**：
   - **这台电脑（macOS）**：装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，启动后再执行下面的命令。
   - **小主机（Linux）**：`curl -fsSL https://get.docker.com | sh` 后 `sudo usermod -aG docker $USER`。
-- 首次构建需要联网拉取依赖并编译原生模块（better-sqlite3 / sharp）。**国内网络已预配阿里云 apt / npm 镜像**，正常约几分钟；不要在国内网络下把 Dockerfile 里的镜像源改回官方源。
+- 首次构建需要联网拉取依赖并编译原生模块（better-sqlite3 / sharp）。**国内网络已预配多镜像兜底**：apt 走 ustc / tuna / 163 / 华为云 / 阿里云 / 腾讯云 的循环（任一通即用，单镜像站偶尔 502 会自动换下一个），npm 走 npmmirror；正常约几分钟。不要在国内网络下把 Dockerfile 里的镜像源改回官方源。
 
 ### 2. 本地一键启动（这台电脑）
 
@@ -168,10 +170,112 @@ ADMIN_PASSWORD=dev node server.js   # 访问 http://localhost:8080
 
 ### 10. 常见问题
 
-- **构建卡在 apt / npm 超时**：国内网络已改阿里云镜像；若在海外机器，把 Dockerfile 里的 `mirrors.aliyun.com` 与 `registry.npmmirror.com` 改回官方源即可。
+- **构建卡在 apt / npm 超时**：Dockerfile 构建期已用多镜像兜底循环（ustc / tuna / 163 / 华为云 / 阿里云 / 腾讯云，任一通即用），npm 走 npmmirror，正常不用改。若仍卡在 apt，多半是容器内的 DNS 解析不到这些镜像站（容器内 DNS 与宿主机不同，单个站可能偶发 502）——可换用你网络下其他可达的 Debian 镜像源，或临时把构建机 DNS 改到公共 DNS 再构建；npm 若慢，把 `registry.npmmirror.com` 换成更快的镜像。海外机器可直接把镜像源改回官方源（删除 Dockerfile 里的兜底循环、npm 改 `registry.npmjs.org`）。
 - **向导提交报 `EPROTO wrong version number`**：勾了「启用 HTTPS」但端点其实是 HTTP（内置 MinIO 就是 HTTP）。取消勾选再提交。
 - **登录后地图/数据空白**：确认 `ADMIN_PASSWORD` 与登录密码一致；控制台看 `docker compose logs travelmap` 有无 SQLite / MinIO 连接报错。
 - **数据丢了？** 检查 `./data/travelmap.db` 是否还在；容器重建不会动绑定挂载的目录。
+
+---
+
+## 四、从 Docker Hub 拉取部署（无需源码 / 换机器）
+
+适用场景：镜像已经构建并推送到 Docker Hub（地址 `docker.io/<DH_USER>/travelmap`），现在要到一台**新机器**（如 x86 小主机）上运行。目标机器**不需要源码**，只要装了 Docker + Compose 即可。
+
+> 本地这台电脑想自己改代码、自己构建，走上面的「二、本地一键启动」即可；本节能让你把做好的镜像一键部署到别的机器。
+
+### 1. 前置
+
+- 目标机器装好 Docker + Docker Compose（同「一、环境要求」）。
+- **不需要 `docker login`**（拉的是公开镜像）。
+
+### 2. 步骤
+
+```bash
+# 1) 把 docker-compose.prod.yml 和 .env.example 传到目标机器
+#    （git clone 后只取这两个文件也行）
+
+# 2) 建 .env 并填好关键项
+cp .env.example .env
+#   编辑 .env：
+#     DH_USER=wyc6036                        # 你的 Docker Hub 用户名（决定镜像路径 docker.io/<DH_USER>/travelmap）
+#     ADMIN_PASSWORD=<你的强密码>             # 必填
+#     SESSION_SECRET=$(openssl rand -hex 32)  # 建议固定，容器重启后已登录会话不失效
+#     MINIO_DATA_DIR=./minio-data
+#     APP_DATA_DIR=./data
+
+# 3) 拉取并启动
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+
+# 4) 看日志确认起好
+docker compose -f docker-compose.prod.yml logs -f travelmap
+```
+
+浏览器打开 **http://\<机器IP\>:8080**，用你设的密码登录。镜像已内置 GeoNames 城市库与 38 个种子地点，首启自动导入，数据从 0 开始。
+
+**更新 / 换机**：在新机器上重新执行 `pull && up -d` 即可（镜像已含最新代码）；回滚需保留旧版本标签。
+
+### 3. 架构说明（重要）
+
+镜像目前发布了两个架构标签：
+
+| 标签 | 架构 | 适用机器 |
+|------|------|----------|
+| `wyc6036/travelmap:latest` | **linux/amd64** | x86 / 大部分小主机（Intel / AMD） |
+| `wyc6036/travelmap:arm64` | **linux/arm64** | Mac（Apple Silicon）/ 树莓派等 ARM 机器 |
+
+> ⚠️ **当前 `:latest` 是单架构 amd64**（受发布端 Docker Hub 访问限制，暂未拼成 amd64+arm64 合一的 manifest list）。因此：
+> - **x86 机器**：`docker-compose.prod.yml` 默认用 `:latest`，直接 `pull && up -d` 即可原生运行，无需任何改动。
+> - **Mac / ARM 机器**：**不要直接拉 `:latest`**（会被当成 amd64，触发 Rosetta 转译或报 `exec format error`）。请把 `docker-compose.prod.yml` 里 travelmap 服务的 `image` 改成 `${DH_USER}/travelmap:arm64` 再 `pull && up -d`；或先 `docker pull wyc6036/travelmap:arm64` 再手动 `docker run`。
+>
+> 待发布端网络恢复后，`:latest` 会升级成真正的多架构镜像，到时 ARM 机器也能直接 `:latest`（无需改 compose）。
+
+---
+
+## 五、发布新版镜像（维护者）
+
+把本地改动构建成镜像并推到 Docker Hub，供「四」里的部署机拉取。
+
+### 1. 前置
+
+- `docker login` 已登录 Docker Hub（发布需要凭证）。
+- 多架构构建一般 Docker Desktop 已内置 QEMU 模拟，无需额外操作；若 buildx 报错找不到平台，先：
+  ```bash
+  docker buildx create --use
+  docker run --privileged --rm tonistiigi/binfmt --install all
+  ```
+
+### 2. 常规方式（Docker Hub 可正常访问时，推荐）
+
+一次打出 amd64 + arm64 并推送 manifest list：
+
+```bash
+./publish.sh wyc6036            # 推 :v1 和 :latest（含 amd64+arm64）
+./publish.sh wyc6036 v2         # 升版本，推 :v2 和 :latest
+```
+
+这样无论 ARM 还是 x86 部署机都能直接拉到对应架构，不会出现 `manifest unknown / 404`。
+
+### 3. 国内 Docker Hub 污染时的退化方案
+
+若 `registry-1.docker.io` 的 manifest 读取被污染（返回 `Bad Gateway`），`buildx` 直接 `--platform linux/amd64,linux/arm64 --push` 会在拼 manifest list 那一步失败。此时改为**分两次单架构构建 + 推送**（单架构 `docker push` 走 blob PUT，路径通常可用，偶发超时重试即可断点续传）：
+
+```bash
+# —— amd64（满足 x86 部署机，并作为 :latest）——
+docker buildx build --platform linux/amd64 --load -t wyc6036/travelmap:amd64 .
+docker tag wyc6036/travelmap:amd64 wyc6036/travelmap:latest
+docker push wyc6036/travelmap:amd64
+docker push wyc6036/travelmap:latest
+
+# —— arm64（供 Mac / ARM）——
+# NODE_BASE 指定本地已拉好的真实 arm64 node 基础镜像（见下方说明）
+docker buildx build --platform linux/arm64 --load --build-arg NODE_BASE=node-arm64-real -t wyc6036/travelmap:arm64 .
+docker push wyc6036/travelmap:arm64
+```
+
+> **关于 `NODE_BASE`**：Dockerfile 新增了可选构建参数 `ARG NODE_BASE=node:20-slim`（两处 `FROM ${NODE_BASE}`）。国内网络下 `node:20-slim` 经部分镜像代理会被错误地只返回单一架构，导致交叉架构构建出的镜像 base 层错乱（在异架构机 `exec format error`）。退化方案里可先用多架构代理（如 `docker.1ms.run`）按 digest 拉取**真实架构**的 node 镜像并打 tag（例如 `node-amd64-real` / `node-arm64-real`），再传给 `NODE_BASE` 让 buildx 离线使用正确基础镜像。正常情况下不传 `NODE_BASE` 即可。
+
+> 注：退化方案下 `:latest` 只是 amd64 单架构（见「四、3」）。等网络恢复，重跑「2. 常规方式」即可把 `:latest` 升级成真正的多架构 manifest list。
 
 ---
 

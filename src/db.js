@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS media (
   thumb_url   TEXT DEFAULT '',
   caption     TEXT DEFAULT '',
   text_body   TEXT DEFAULT '',
+  /* 名称 / 备注：用户可在照片编辑弹窗里维护（与 caption/笔记相互独立） */
+  name        TEXT DEFAULT '',
+  remark      TEXT DEFAULT '',
   width       INTEGER DEFAULT 0,
   height      INTEGER DEFAULT 0,
   taken_at    TEXT DEFAULT '',
@@ -132,9 +135,9 @@ const stmt = {
   setTripPlaces: db.prepare('DELETE FROM trip_places WHERE trip_id=?'),
   addTripPlace: db.prepare('INSERT OR IGNORE INTO trip_places (trip_id,place_id,sort_order) VALUES (?,?,?)'),
   insertMedia: db.prepare(`
-    INSERT INTO media (id,place_id,trip_id,kind,url,thumb_url,caption,text_body,width,height,taken_at,
+    INSERT INTO media (id,place_id,trip_id,kind,url,thumb_url,caption,text_body,name,remark,width,height,taken_at,
       camera_make,camera_model,lens,gps_lat,gps_lng,focal_length,f_number,iso,sort_index,status)
-    VALUES (@id,@place_id,@trip_id,@kind,@url,@thumb_url,@caption,@text_body,@width,@height,@taken_at,
+    VALUES (@id,@place_id,@trip_id,@kind,@url,@thumb_url,@caption,@text_body,@name,@remark,@width,@height,@taken_at,
       @camera_make,@camera_model,@lens,@gps_lat,@gps_lng,@focal_length,@f_number,@iso,@sort_index,@status)
   `),
   /* 媒体元数据（上传后回填：图片走 sharp+exif-reader，视频走 ffprobe） */
@@ -282,6 +285,8 @@ function addMedia(m) {
     thumb_url: m.thumb_url ? String(m.thumb_url) : '',
     caption: String(m.caption || ''),
     text_body: String(m.text_body || ''),
+    name: String(m.name || ''),
+    remark: String(m.remark || ''),
     width: Number(m.width || 0),
     height: Number(m.height || 0),
     taken_at: String(m.taken_at || ''),
@@ -337,6 +342,8 @@ function updateMedia(id, fields) {
   const vals = [];
   if (typeof fields.caption === 'string') { sets.push('caption = ?'); vals.push(fields.caption); }
   if (typeof fields.taken_at === 'string') { sets.push('taken_at = ?'); vals.push(fields.taken_at); }
+  if (typeof fields.name === 'string') { sets.push('name = ?'); vals.push(fields.name); }
+  if (typeof fields.remark === 'string') { sets.push('remark = ?'); vals.push(fields.remark); }
   if (!sets.length) return false;
   vals.push(id);
   const r = db.prepare(`UPDATE media SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -476,6 +483,7 @@ function getExport() {
   for (const m of mediaRows) {
     const item = {
       id: m.id, type: m.kind, url: m.url, caption: m.caption, poster: m.thumb_url || '',
+      name: m.name || '', remark: m.remark || '',
       takenAt: m.taken_at || '',
       cameraMake: m.camera_make || '', cameraModel: m.camera_model || '', lens: m.lens || '',
       gpsLat: Number(m.gps_lat) || 0, gpsLng: Number(m.gps_lng) || 0,
@@ -728,7 +736,7 @@ function maybeSeed() {
 function migrateMediaMeta() {
   const have = new Set((db.pragma('table_info(media)') || []).map((c) => c.name));
   const numericReal = ['gps_lat', 'gps_lng', 'focal_length', 'f_number'];
-  for (const col of ['camera_make', 'camera_model', 'lens', 'gps_lat', 'gps_lng', 'focal_length', 'f_number', 'iso']) {
+  for (const col of ['camera_make', 'camera_model', 'lens', 'gps_lat', 'gps_lng', 'focal_length', 'f_number', 'iso', 'name', 'remark']) {
     if (!have.has(col)) {
       const type = numericReal.includes(col) ? 'REAL' : (col === 'iso' ? 'INTEGER' : 'TEXT');
       try { db.prepare(`ALTER TABLE media ADD COLUMN ${col} ${type} DEFAULT ''`).run(); }

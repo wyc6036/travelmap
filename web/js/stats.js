@@ -311,7 +311,7 @@ function yearsPanel(m) {
       .filter((t) => y.byType[t])
       .map((t) => {
         const share = (y.byType[t] / y.total) * 100;
-        return `<i class="ybar__seg" style="height:${share.toFixed(2)}%;background:${
+        return `<i class="ybar__seg" style="height:${share.toFixed(2)}%;background-color:${
           escapeHtml(state_color(t))}"></i>`;
       }).join('');
     return `
@@ -651,6 +651,7 @@ function enableTips(root) {
 /** 年份柱：点击筛选；芯片可点 → 跳地图 */
 function bindYearFilter(root, m, onGoPlace) {
   const bars = [...root.querySelectorAll('.ybar')];
+  const labels = [...root.querySelectorAll('.years__x')];
   const detail = root.querySelector('#tm-years-detail');
   const plotWrap = root.querySelector('.years');
   if (!bars.length || !detail) return;
@@ -692,14 +693,15 @@ function bindYearFilter(root, m, onGoPlace) {
     });
   };
 
-  bars.forEach((bar) => {
+  bars.forEach((bar, i) => {
     bar.addEventListener('click', () => {
       const y = Number(bar.dataset.year);
       selected = selected === y ? null : y;
-      bars.forEach((b) => {
+      bars.forEach((b, j) => {
         const on = Number(b.dataset.year) === selected;
         b.classList.toggle('is-active', on);
         b.setAttribute('aria-pressed', String(on));
+        labels[j]?.classList.toggle('is-active', on);
       });
       plotWrap?.classList.toggle('has-selection', selected !== null);
       renderDetail();

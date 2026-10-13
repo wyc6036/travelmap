@@ -381,7 +381,7 @@ export function createDetailModal({
     cell.className = `mgrid__cell${item.type === 'video' ? ' mgrid__cell--video' : ''}${wide ? ' mgrid__cell--wide' : ''}`;
     cell.title = item.caption || '点击全屏查看';
 
-    const thumb = item.type === 'video' && item.poster ? item.poster : item.url;
+    const thumb = item.type === 'video' && item.poster ? item.poster : (item.thumb_url || item.url);
     cell.innerHTML = `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.caption || '')}" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
     if (item.type === 'video') {
       cell.insertAdjacentHTML('beforeend',
@@ -398,8 +398,8 @@ export function createDetailModal({
     const del = mediaDeleteBtn(item);
     if (del) cell.appendChild(del);
 
-    /* 重命名按钮：同样仅单地点模式下提供 */
-    const rn = mediaRenameBtn(item);
+    /* 编辑按钮（原重命名入口）：同样仅单地点模式下提供 */
+    const rn = mediaEditBtn(item);
     if (rn) cell.appendChild(rn);
 
     cell.addEventListener('click', () => openLightbox(list, idx));
@@ -431,63 +431,107 @@ export function createDetailModal({
     return btn;
   }
 
-  /** 媒体重命名按钮：仅单地点详情出现。点击后在格子上浮一层输入框改名（写入 caption）。 */
-  function mediaRenameBtn(item) {
+  /** 媒体编辑按钮：仅单地点详情出现。点击后弹出小窗编辑「名称 + 备注」。
+   * 复用原"重命名"入口（网格右上角铅笔键），只是从内联改名升级为独立弹窗。 */
+  function mediaEditBtn(item) {
     if (current?.kind !== 'place' || !item || !item.id) return null;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'mgrid__renamebtn';
-    btn.title = '重命名';
-    btn.setAttribute('aria-label', '重命名媒体');
+    btn.title = '编辑名称和备注';
+    btn.setAttribute('aria-label', '编辑媒体');
     btn.innerHTML = '<svg class="ico ico--sm" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 9.5M4 20l1.2-4.3 10.3-10.3a2 2 0 0 1 2.8 0l1.8 1.8a2 2 0 0 1 0 2.8L9.3 18.8 5 20z"/></svg>';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      startRename(item, btn.parentElement);
+      openMediaEditModal(item);
     });
     return btn;
   }
 
   /**
-   * 在媒体格子上浮一层输入框，原地重命名（caption）。
-   * 回车 / 「保存」提交；Esc / 点遮罩取消。提交后刷新详情网格。
+   * 照片编辑小弹窗：编辑「名称」(name) 与「备注」(remark)。
+   * 复用了原"重命名"入口（网格铅笔键），点击后弹出 modal-edit 风格小窗；
+   * 灯箱信息栏头部也复用同一函数，便于在预览时直接改。
+   * 提交后写回后端，并就地刷新灯箱信息栏（若正显示这条媒体）+ 详情网格。
    */
-  function startRename(item, cell) {
-    if (!cell || cell.querySelector('.mgrid__rename')) return;
-    const overlay = document.createElement('div');
-    overlay.className = 'mgrid__rename';
-    const input = document.createElement('input');
-    input.className = 'mgrid__rename-input';
-    input.value = item.caption || '';
-    input.maxLength = 80;
-    input.placeholder = '输入名称';
-    const go = document.createElement('button');
-    go.type = 'button';
-    go.className = 'mgrid__rename-go';
-    go.textContent = '保存';
-    overlay.append(input, go);
+  function openMediaEditModal(item) {
+    if (!item || !item.id) return;
+    if (document.getElementById('tm-media-edit-modal')) return; // 防重复打开
 
-    const cleanup = () => overlay.remove();
+    const modal = document.createElement('div');
+    modal.className = 'modal-edit';
+    modal.id = 'tm-media-edit-modal';
+    modal.innerHTML = `
+      <div class="modal-edit__mask" data-close="1"></div>
+      <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-label="编辑媒体">
+        <header class="modal-edit__head">
+          <h3>编辑媒体</h3>
+          <button class="modal-edit__close" type="button" data-close="1" aria-label="关闭">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+          </button>
+        </header>
+        <form class="modal-edit__body" id="tm-media-edit-form">
+          <div class="form-row">
+            <label class="form-label" for="tm-media-name">名称</label>
+            <input id="tm-media-name" class="form-input" type="text" maxlength="120" placeholder="给这张照片起个名字" />
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="tm-media-remark">备注</label>
+            <textarea id="tm-media-remark" class="form-input" rows="4" maxlength="500" placeholder="记录点什么…"></textarea>
+          </div>
+          <p class="form-status" id="tm-media-edit-status" hidden></p>
+        </form>
+        <div class="modal-edit__foot">
+          <button class="btn btn--ghost" type="button" data-close="1">取消</button>
+          <button class="btn btn--primary" type="button" id="tm-media-edit-go">保存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const nameEl = modal.querySelector('#tm-media-name');
+    const remarkEl = modal.querySelector('#tm-media-remark');
+    const statusEl = modal.querySelector('#tm-media-edit-status');
+    const goBtn = modal.querySelector('#tm-media-edit-go');
+    const form = modal.querySelector('#tm-media-edit-form');
+
+    nameEl.value = item.name || '';
+    remarkEl.value = item.remark || '';
+
+    const close = () => {
+      modal.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    document.addEventListener('keydown', onKey);
+    modal.querySelectorAll('[data-close="1"]').forEach((el) => el.addEventListener('click', close));
+
     const commit = async () => {
-      const v = input.value.trim();
-      cleanup();
+      goBtn.disabled = true;
+      statusEl.hidden = true;
+      const name = nameEl.value.trim();
+      const remark = remarkEl.value.trim();
       try {
-        await api.updateMedia(item.id, { caption: v });
-        toast('已重命名', 1500);
+        await api.updateMedia(item.id, { name, remark });
+        // 就地刷新灯箱信息栏（若正显示这条媒体）
+        item.name = name;
+        item.remark = remark;
+        if (!lightbox.hidden && lbList[lbIndex] && lbList[lbIndex].id === item.id) {
+          renderInfo(item);
+        }
+        toast('已保存', 1500);
+        close();
         if (typeof onMediaChanged === 'function') onMediaChanged();
       } catch (err) {
-        toast('重命名失败：' + (err.message || err), 2400);
+        statusEl.hidden = false;
+        statusEl.textContent = '保存失败：' + (err.message || err);
+        goBtn.disabled = false;
       }
     };
-    go.addEventListener('click', commit);
-    overlay.addEventListener('click', (e) => { e.stopPropagation(); if (e.target === overlay) cleanup(); });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
-    });
-    cell.appendChild(overlay);
-    input.focus();
-    input.select();
+    goBtn.addEventListener('click', commit);
+    form.addEventListener('submit', (e) => { e.preventDefault(); commit(); });
+
+    nameEl.focus();
   }
 
   function renderContent(view) {
@@ -505,7 +549,7 @@ export function createDetailModal({
           + escapeHtml(m.text || '');
         const del = mediaDeleteBtn(m);
         if (del) { del.classList.add('mgrid__del--static'); card.appendChild(del); }
-        const rn = mediaRenameBtn(m);
+        const rn = mediaEditBtn(m);
         if (rn) { rn.classList.add('mgrid__renamebtn--static'); card.appendChild(rn); }
         wrap.append(card);
       });
@@ -556,23 +600,42 @@ export function createDetailModal({
     if (item.iso) params.push(`ISO ${item.iso}`);
     if (params.length) rows.push(['拍摄参数', escapeHtml(params.join(' · '))]);
 
-    let html = '';
-    if (rows.length) {
-      html += '<dl class="lb-meta">';
-      for (const [k, v] of rows) html += `<dt>${k}</dt><dd>${v}</dd>`;
-      html += '</dl>';
+    const hasMeta = rows.length > 0;
+    const hasLoc = !!(item.gpsLat && item.gpsLng);
+
+    // 顶部：名称（无 name 时回退到 caption，两者皆空则占位）+ 编辑入口
+    const displayName = item.name || item.caption || '未命名';
+    let html = '<div class="lb-head">'
+      + `<div class="lb-name">${escapeHtml(displayName)}</div>`
+      + '<button class="lb-edit" type="button" aria-label="编辑名称和备注">编辑</button>'
+      + '</div>';
+
+    let body = '';
+    if (hasMeta) {
+      body += '<dl class="lb-meta">';
+      for (const [k, v] of rows) body += `<dt>${k}</dt><dd>${v}</dd>`;
+      body += '</dl>';
     }
-    if (item.gpsLat && item.gpsLng) {
+    if (hasLoc) {
       const feat = countryAt(item.gpsLng, item.gpsLat);
       const cname = feat ? (feat.properties?.['name:zh-Hans'] || feat.properties?.name || '') : '';
-      html += '<div class="lb-loc"><span class="lb-loc__label">位置</span>'
+      body += '<div class="lb-loc"><span class="lb-loc__label">位置</span>'
         + `<span class="lb-loc__val">${cname ? escapeHtml(cname) + ' · ' : ''}${item.gpsLat.toFixed(4)}°, ${item.gpsLng.toFixed(4)}°</span>`
         + '<div class="lightbox__map" id="tm-lb-map"></div></div>';
-    } else if (!rows.length) {
-      html = '<p class="lb-empty">这张媒体没有可用的拍摄信息</p>';
+    } else if (!hasMeta) {
+      body = '<p class="lb-empty">这张媒体没有可用的拍摄信息</p>';
     }
+    // 备注：紧贴在迷你地图下方（无位置信息时则落在元数据下方）
+    if (item.remark) {
+      body += `<div class="lb-remark"><span class="lb-remark__label">备注</span>${escapeHtml(item.remark)}</div>`;
+    }
+    html += body;
     infoEl.innerHTML = html;
-    return rows.length > 0 || !!(item.gpsLat && item.gpsLng);
+
+    const editBtn = infoEl.querySelector('.lb-edit');
+    if (editBtn) editBtn.addEventListener('click', () => openMediaEditModal(item));
+
+    return hasMeta || hasLoc;
   }
 
   /** 在信息栏的 #tm-lb-map 上画一张迷你线条地图 + 打点（positron 线描底图） */
@@ -966,6 +1029,9 @@ export function createDetailModal({
     open,
     openTrip,
     close,
+    /** 直接进入全屏预览（照片查看页）：传入可视图媒体列表与起始索引。
+     *   供「记录」页、主页海报墙点照片时直达，不再绕道地点详情弹窗。 */
+    openLightbox,
     isOpen: () => !modal.hidden,
     get current() { return current?.ref || null; },
     /** 调试与验收用：当前是不是"行程模式"，以及这条路线上的站点顺序 */

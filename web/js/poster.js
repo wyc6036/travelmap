@@ -191,7 +191,8 @@ export function createPoster({ root, onOpen }) {
       const el = e.target.closest('.pw');
       if (!el) return;
       const rec = blocks.find((b) => b.el === el);
-      if (rec?.cur?.place) onOpen(rec.cur.place);
+      /* 点海报上的照片 → 直接进照片查看页（onOpen 第二参是源媒体，便于定位到当前这张） */
+      if (rec?.cur?.place) onOpen(rec.cur.place, rec.cur.media);
     });
   }
   root.addEventListener('mouseenter', () => { paused = true; });

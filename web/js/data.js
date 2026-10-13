@@ -64,6 +64,11 @@ function normalizeMediaItem(item, place, index) {
   const caption = pick(asObject, ['caption', '说明', 'title', '标题', 'label'], '');
   const text = pick(asObject, ['text', 'content', '正文', '内容', 'body'], '');
   const poster = pick(asObject, ['poster', '封面', 'thumb', 'thumbnail'], '');
+  /* 后端（server.js 上传时）已生成 720px 缩略图并写入 thumb_url，
+     网格只需它即可，全尺寸 url 留给灯箱查看页。必须透传，否则前端一律拉全图。 */
+  const thumbUrl = pick(asObject, ['thumb_url', 'thumbUrl', '缩略图', 'thumbnailUrl'], '');
+  const name = pick(asObject, ['name', '名称'], '');
+  const remark = pick(asObject, ['remark', '备注'], '');
 
   /* 后端（/api/data）会带来 EXIF 元数据，必须逐字段透传——
      ⚠️ 曾在这里只挑 type/url/caption/poster 重建对象，把拍摄时间/设备/参数/GPS
@@ -87,12 +92,13 @@ function normalizeMediaItem(item, place, index) {
   if (type === 'text') {
     const body = text || caption || url;
     if (!body) return null;
-    return { type, text: String(body), caption: String(caption || ''), raw: item, id, ...meta };
+    return { type, text: String(body), caption: String(caption || ''), name: String(name || ''), remark: String(remark || ''), raw: item, id, ...meta };
   }
   if (!url) return null;
   return {
     type, url: String(url), caption: String(caption || ''),
-    poster: poster ? String(poster) : '', raw: item, id,
+    name: String(name || ''), remark: String(remark || ''),
+    poster: poster ? String(poster) : '', thumb_url: thumbUrl ? String(thumbUrl) : '', raw: item, id,
     ...meta,
   };
 }

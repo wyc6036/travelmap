@@ -402,6 +402,12 @@
 }
 .lightbox__close:hover { background: rgba(255, 255, 255, .26); transform: rotate(90deg); }
 
+/* 宽屏：信息栏在右侧占 340px，右上角的「关闭」按钮若停在屏幕最右上会压住
+   信息栏顶部的「编辑」按钮。把 × 左移到舞台区域（避让信息栏），两者不再重叠。 */
+@media (min-width: 901px) {
+  .lightbox__close { right: calc(340px + 18px); }
+}
+
 /* 舞台 + 信息栏 的横向布局：左舞台（flex:1）右信息栏（固定宽）。
    导航按钮放在舞台内部（position:relative），左右贴舞台边缘，不会压到信息栏。 */
 .lightbox__layout {
@@ -462,6 +468,32 @@
   border: 2px solid #fff;
 }
 .lb-empty { color: rgba(255, 255, 255, .5); font-size: 13px; padding: 6px 2px; }
+
+/* 信息栏顶部：名称 + 编辑入口 */
+.lb-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 14px;
+}
+.lb-name {
+  font-size: 16px; font-weight: 700; line-height: 1.4; color: #fff;
+  word-break: break-word;
+}
+.lb-edit {
+  flex: none; border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .06); color: rgba(255, 255, 255, .85);
+  font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.lb-edit:hover { background: var(--primary, #7C9CC3); border-color: var(--primary, #7C9CC3); color: #fff; }
+/* 备注：紧贴在迷你地图下方（无位置时落在元数据下方） */
+.lb-remark {
+  margin-top: 14px; border-top: 1px solid rgba(255, 255, 255, .1); padding-top: 12px;
+  font-size: 13.5px; line-height: 1.6; color: rgba(255, 255, 255, .85);
+  white-space: pre-wrap; word-break: break-word;
+}
+.lb-remark__label {
+  display: block; color: rgba(255, 255, 255, .55); font-size: 12px; font-weight: 600; margin-bottom: 4px;
+}
 
 .lightbox__bar {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;

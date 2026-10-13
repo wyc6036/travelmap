@@ -446,6 +446,20 @@ async function boot() {
   app.ui = createUI({
     onSelectPlace: (place, opts) => selectPlace(place, { openModal: opts?.openModal, fly: true }),
     onOpenDetail: (place) => selectPlace(place, { openModal: true, fly: false }),
+    /* 点照片（记录页 / 海报墙）→ 直接进全屏照片查看页（lightbox），不再弹地点详情弹窗。
+       ⚠️ 文字笔记没有画面，lightbox 无法预览，回落到地点详情弹窗。 */
+    onOpenPhoto: (place, item) => {
+      if (!place) return;
+      if (!item || item.type === 'text') {
+        selectPlace(place, { openModal: true, fly: false });
+        return;
+      }
+      const list = (place.media || []).filter((m) => m.type === 'image' || m.type === 'video');
+      let index = list.findIndex((m) => m.id && item.id && m.id === item.id);
+      if (index < 0) index = list.findIndex((m) => m.url === item.url);
+      if (index < 0) index = 0;
+      app.modal?.openLightbox(list, index);
+    },
     onAddPlace: () => addPlace?.open(),
     onAddTrip: () => addTrip?.open(),
     onOpenArchive: () => archive?.open(),

@@ -5,6 +5,8 @@
 #   2) docker compose -f docker-compose.prod.yml pull
 #   3) docker compose -f docker-compose.prod.yml up -d
 # 更新: 换机器上重新执行 pull && up -d 即可（镜像已含最新代码）
+# 架构: 默认 image 为 ${DH_USER}/travelmap:latest，当前它是 linux/amd64（x86 机器直接可用）。
+#       Mac / ARM 机器请先把 image 改成 ${DH_USER}/travelmap:arm64 再 pull && up -d（详见 README「四、3」）。
 # 注意: MinIO 默认密码仅适合本地测试；正式部署请改掉 MINIO_ROOT_PASSWORD / MINIO_SECRET_KEY。
 # =========================================================
 services:
@@ -22,7 +24,7 @@ services:
     restart: unless-stopped
 
   travelmap:
-    image: ${DH_USER:-youruser}/travelmap:latest
+    image: ${DH_USER:?请在 .env 里设置 DH_USER（你的 Docker Hub 用户名）}/travelmap:latest
     container_name: travelmap
     depends_on:
       - minio

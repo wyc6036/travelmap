@@ -367,12 +367,14 @@ app.delete('/api/media/:id', write, async (req, res) => {
   }
 });
 
-/* 更新单条媒体：重命名 caption / 补 taken_at 等可编辑字段（传什么改什么） */
+/* 更新单条媒体：重命名 caption / 补 taken_at / 名称 name / 备注 remark（传什么改什么） */
 app.put('/api/media/:id', write, (req, res) => {
   try {
     const ok = updateMedia(req.params.id, {
       caption: req.body && typeof req.body.caption === 'string' ? req.body.caption : undefined,
       taken_at: req.body && typeof req.body.taken_at === 'string' ? req.body.taken_at : undefined,
+      name: req.body && typeof req.body.name === 'string' ? req.body.name : undefined,
+      remark: req.body && typeof req.body.remark === 'string' ? req.body.remark : undefined,
     });
     if (!ok) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });

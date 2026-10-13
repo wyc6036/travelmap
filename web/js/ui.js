@@ -40,8 +40,10 @@ const icon = (name, cls = 'ico') => `<svg class="${cls}" viewBox="0 0 24 24"><us
  * 小组件
  * ========================================================= */
 function mediaThumb(item, { lazy = true } = {}) {
+  /* 网格缩略图优先用后端预生成的 720px 缩略图（thumb_url），重量级全图（url）只留给灯箱查看页，
+     这样滚动时下载/解码压力大幅降低，避免“一半白屏” */
   if (item.type === 'video' && item.poster) return item.poster;
-  return item.url;
+  return item.thumb_url || item.url;
 }
 
 function mediaCard(item, place, { onOpen, showPlace = true }) {
@@ -83,7 +85,8 @@ function placeCard(place, { onOpen }) {
   /* 封面优先级：真实媒体（用户上传的图/视频首帧）> 联网地标占位图（cover_url）> 默认占位 SVG。
      这样"上传真实媒体后占位图被替换 + 彻底让位"自然成立，无需额外判断。 */
   const media = place.media || [];
-  const realCover = (media.find((m) => m.type === 'image') || {}).url
+  const realCover = (media.find((m) => m.type === 'image') || {}).thumb_url
+    || (media.find((m) => m.type === 'image') || {}).url
     || (media.find((m) => m.type === 'video') || {}).poster
     || (media.find((m) => m.type === 'video') || {}).url
     || '';
@@ -167,7 +170,7 @@ function pickDom(map) {
   return out;
 }
 
-export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive }) {
+export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive }) {
   const dom = pickDom({
     nav: '#tm-nav',
     scroll: '#tm-scroll',
@@ -215,12 +218,29 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
      状态若只存在 DOM 里，10 秒一轮的自动同步就会把它抹掉（见 tripGroupRow）。 */
   const expandedTrips = new Set();
 
-  /* 旅途海报：整墙的翻牌逻辑在 js/poster.js，这里只负责喂素材池 + 桥接点击 */
+  /* 旅途海报：整墙的翻牌逻辑在 js/poster.js，这里只负责喂素材池 + 桥接点击。
+     ⚠️ 点海报上的照片 → 直接进照片查看页（lightbox），不再弹地点详情弹窗。 */
   const poster = createPoster({
     root: dom.posterWall,
-    onOpen: (place) => onOpenDetail?.(place),
+    onOpen: (place, item) => onOpenPhoto?.(place, item),
   });
   dom.posterShuffle?.addEventListener('click', () => poster.shuffle());
+
+  /* 记录页筛选条：常驻顶部（sticky）；玻璃带强度随滚动进度渐显。
+     把 p∈[0,1] 写进 CSS 变量 --coll-p，由 CSS 负责「模糊 + 底部渐隐」的表现
+     —— 复刻地点详情弹窗「地图与媒体之间」的 ScrollEdgeEffect（JS 只算值，一帧一次）。 */
+  if (dom.scroll && dom.collFilter) {
+    let rafId = 0;
+    const syncFilterEdge = () => {
+      rafId = 0;
+      const p = Math.min(1, Math.max(0, dom.scroll.scrollTop / 24));
+      dom.collFilter.style.setProperty('--coll-p', p.toFixed(3));
+    };
+    dom.scroll.addEventListener('scroll', () => {
+      if (!rafId) rafId = requestAnimationFrame(syncFilterEdge);
+    }, { passive: true });
+    syncFilterEdge();
+  }
 
   /* ---------- 视图切换 ---------- */
   function setView(name, { media } = {}) {
@@ -233,6 +253,10 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       v.hidden = !active;
       v.classList.toggle('is-active', active);
     });
+
+    // 页尾说明文字（底图/数据/国界版权等）：仅主页（地图）与设置页展示，其余视图隐藏
+    const foot = document.querySelector('.sitefoot');
+    if (foot) foot.hidden = !(name === 'map' || name === 'settings');
 
     dom.nav.querySelectorAll('[data-view]').forEach((b) => {
       const same = b.dataset.view === name;
@@ -324,7 +348,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
       for (const p of stats.past) {
         for (const m of p.media) if (m.type === mediaFilter) items.push({ p, m });
       }
-      items.slice(0, 3).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenDetail })));
+      items.slice(0, 3).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
       if (!items.length) {
         grid.innerHTML = emptyState(`还没有${MEDIA_LABELS[mediaFilter]}`, '打开地点详情，用「添加媒体」上传即可');
       }
@@ -354,6 +378,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
           src: m.url,
           poster: m.type === 'video' ? (m.poster || '') : '',
           place: p,
+          media: m,
           title: p.name,
           sub: p.date ? formatDateRange(p.date, p.endDate) : (p.countryZh || ''),
         });
@@ -382,7 +407,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     const mediaPool = [];
     for (const p of stats.past) for (const m of p.media) mediaPool.push({ p, m });
     mediaPool.slice(0, 6).forEach(({ p, m }) => {
-      dom.stripCollections.append(mediaCard(m, p, { onOpen: onOpenDetail }));
+      dom.stripCollections.append(mediaCard(m, p, { onOpen: onOpenPhoto }));
     });
     if (!mediaPool.length) dom.stripCollections.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里');
     dom.collTotal.textContent = `(${stats.media.total})`;
@@ -621,21 +646,61 @@ export function createUI({ onSelectPlace, onOpenDetail, onViewChange, onSearch, 
     root.append(wrap);
   }
 
+  /**
+   * 「我的记录」：按地点归类展示。
+   * 每个地点一行：左侧是地点时间线节点（日期 + 名称 + 连接线），右侧是该地点的媒体网格。
+   * 地点按日期从新到旧排序（无日期的沉底）；顶部筛选（全部/图片/视频/文字）仍生效。
+   */
   function renderCollectionsView() {
     const root = dom.viewCollections;
-    const pool = [];
-    for (const p of state.places) for (const m of p.media) pool.push({ p, m });
-
-    const filtered = collMediaFilter === 'all' ? pool : pool.filter((x) => x.m.type === collMediaFilter);
     root.innerHTML = '';
-    if (!filtered.length) {
+
+    const groups = [...state.places]
+      .map((p) => {
+        let media = p.media || [];
+        if (collMediaFilter !== 'all') media = media.filter((m) => m.type === collMediaFilter);
+        return { place: p, media };
+      })
+      .filter((g) => g.media.length > 0)
+      .sort((a, b) => {
+        const ta = a.place.dateTs || (a.place.date ? Date.parse(a.place.date) || 0 : 0);
+        const tb = b.place.dateTs || (b.place.date ? Date.parse(b.place.date) || 0 : 0);
+        return tb - ta;
+      });
+
+    if (!groups.length) {
       root.innerHTML = emptyState('这个分类还没有内容', '打开地点详情，用「添加媒体」上传即可');
       return;
     }
-    const grid = document.createElement('div');
-    grid.className = 'mediagrid';
-    filtered.forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenDetail })));
-    root.append(grid);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'coll-byplace';
+
+    groups.forEach((g) => {
+      const section = document.createElement('section');
+      section.className = 'coll-group';
+
+      // 左：地点时间线节点
+      const tl = document.createElement('div');
+      tl.className = 'coll-timeline';
+      const dateLabel = g.place.date ? formatDateDot(g.place.date) : '未标注日期';
+      tl.innerHTML = `<span class="coll-dot"></span>`
+        + `<span class="coll-date">${escapeHtml(dateLabel)}</span>`
+        + `<span class="coll-place">${escapeHtml(g.place.name)}</span>`;
+
+      // 右：该地点媒体网格
+      const media = document.createElement('div');
+      media.className = 'coll-media';
+      const grid = document.createElement('div');
+      grid.className = 'mediagrid';
+      g.media.forEach((m) => grid.append(mediaCard(m, g.place, { onOpen: onOpenPhoto })));
+      media.append(grid);
+
+      section.append(tl, media);
+      wrap.append(section);
+    });
+
+    root.append(wrap);
   }
 
   function renderWishlistView() {

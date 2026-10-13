@@ -215,6 +215,59 @@
 .chip:hover { border-color: var(--primary); color: var(--primary-ink); }
 .chip.is-active { background: var(--primary-soft); border-color: transparent; color: var(--primary-ink); font-weight: 600; }
 
+/* 记录页筛选条：**常驻**顶部 + 「地点详情弹窗里地图与媒体之间」那层 ScrollEdgeEffect 玻璃
+   —— backdrop-filter 只做**模糊**、mask 两端渐隐，越靠内容越糊、无缝融进列表，**不叠白底**（白底会发白）。
+   强度随滚动进度 `--coll-p`（JS 写入 0~1）渐显。
+   ⚠️ 玻璃带放 ::before 并垫到 chips 之下（父级 z-index:6 已建层叠上下文，-1 不越界）。
+   ⚠️ 桌面端 `.main__scroll` 有 padding-top:20px，sticky 顶在**内容盒**（实测 filterRect.top=20），
+      上方会露出 20px 没被糊到的内容 → 一条硬边“缝”。故用 --coll-gap 把玻璃带向上多铺同样高度盖住它。
+   ⚠️ 不给 backdrop-filter 加 transition：值逐帧随滚动变，过渡会拖慢。 */
+#tm-coll-filter {
+  --coll-gap: 20px;                /* 盖住滚动容器 padding-top 造成的顶部缝隙（见上） */
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0 -22px;                 /* 玻璃带出血到滚动容器左右边缘 */
+  padding: 10px 22px 16px;         /* 底部留白专供向下渐隐（chips 完整落在玻璃实区内） */
+  background: none;
+  border: 0;
+}
+#tm-coll-filter::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  top: calc(-1 * var(--coll-gap));
+  bottom: 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(calc(var(--coll-p, 0) * 12px)) saturate(1.08);
+  backdrop-filter: blur(calc(var(--coll-p, 0) * 12px)) saturate(1.08);
+  /* 模糊在 chips 上沿附近最强（内容已完全塞进 chips 背后、被不透明 chips 盖住），
+     向上（盖滚动容器 20px 缝隙）与向下都平滑减弱；
+     关键是**下端用一条很长的缓坡降到 0**（46%→100%，约 40px），
+     让玻璃带下沿与下方清晰内容“无缝咬合”——不再像旧版那样在底部 20%  abrupt 收口成一条线。
+     对应弹窗 .modal__mapblur 的“越靠内容越糊”，只是我们下方不是纯白、不能靠白渐隐，
+     所以改用「长缓坡归零」来消除硬边。 */
+  -webkit-mask-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, .5) 14%,
+    #000 38%,
+    #000 46%,
+    rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, .5) 14%,
+    #000 38%,
+    #000 46%,
+    rgba(0, 0, 0, 0) 100%);
+}
+
+/* 窄屏（≤980px）改为整页滚动、侧栏变吸顶横条，筛选条继续 sticky 会与侧栏打架 → 回到普通流 */
+@media (max-width: 980px) {
+  #tm-coll-filter { position: static; margin: 0; padding: 4px 0 12px; }
+  #tm-coll-filter::before { display: none; }
+}
+
 /* 分类圆点 */
 .typeDot {
   width: 12px; height: 12px; border-radius: 50%;
@@ -594,6 +647,40 @@
    ========================================================= */
 .mediagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 11px; }
 
+/* 「我的记录」：按地点归类 —— 左侧地点时间线 + 右侧媒体 */
+.coll-byplace { display: flex; flex-direction: column; }
+.coll-group {
+  display: grid; grid-template-columns: 150px 1fr; gap: 0 24px;
+  padding: 0 0 28px;        /* 底部留白即时间线连接线的间距 */
+  position: relative;
+  /* 屏外分组跳过布局/绘制，滚动更顺；占位高度减少滚动条跳动 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+.coll-timeline { position: relative; padding-left: 22px; align-self: stretch; }
+/* 竖向连接线：从本节点拉到下一个节点（最后一个不画） */
+.coll-timeline::before {
+  content: ''; position: absolute; left: 6px; top: 8px; bottom: -28px;
+  width: 2px; background: var(--line, #E7E0D4);
+}
+.coll-group:last-child .coll-timeline::before { display: none; }
+.coll-dot {
+  position: absolute; left: 0; top: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--primary, #7C9CC3);
+  border: 3px solid var(--surface, #fff);
+  box-shadow: 0 0 0 1px var(--primary, #7C9CC3);
+}
+.coll-date {
+  display: block; font-size: var(--fs-xs); color: var(--ink-3, #8b857b);
+  font-variant-numeric: tabular-nums; padding-top: 2px;
+}
+.coll-place {
+  display: block; font-size: var(--fs-md); font-weight: 700;
+  color: var(--ink, #2a2620); margin-top: 2px; line-height: 1.35;
+}
+.coll-media { min-width: 0; }
+
 .mcard {
   display: flex; flex-direction: column;
   border: 0; padding: 0; background: none;
@@ -942,25 +1029,26 @@
 
 /* ---------- 足迹年轮（堆叠柱状图） ---------- */
 .years { padding-top: 18px; }        /* 给最高柱子的数值标签留出向上溢出的空间 */
-.years__plot { position: relative; height: 138px; }
+.years__plot { position: relative; height: 150px; }
 .years__grid {
   position: absolute; inset: 0;
   background-image: repeating-linear-gradient(
     to top, var(--line-soft) 0 1px, transparent 1px 25%);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-2);   /* 基准线比内部网格线略重，柱子像"踩在地上" */
 }
-.years__avg { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--primary); }
+.years__avg { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(124, 156, 195, .55); }
 .years__avg span {
-  position: absolute; right: 0; top: -15px;
-  padding: 0 4px; border-radius: var(--r-xs);
-  background: var(--surface);
-  font-size: 10px; color: var(--primary-ink); font-variant-numeric: tabular-nums;
+  position: absolute; right: 0; top: -16px;
+  padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  font-size: 10px; font-weight: 600; color: var(--primary-ink); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* 必须在 .years__grid / .years__avg 之后：同 z-index 下后者先画 */
-.years__bars { position: absolute; inset: 0; display: flex; align-items: stretch; gap: 6px; }
+.years__bars { position: absolute; inset: 0; display: flex; align-items: stretch; gap: 7px; justify-content: center; }
 
 .ybar {
-  position: relative; flex: 1 1 0; min-width: 0;
+  position: relative; flex: 1 1 0; min-width: 0; max-width: 46px;
   padding: 0; border: 0; background: none; cursor: pointer;
 }
 /* 入场：从底部长起来。静态值是 transform:none（= 完整高度），
@@ -968,36 +1056,42 @@
 .ybar__stack {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--h, 0%);
   display: flex; flex-direction: column-reverse;      /* DOM 第一个 = 柱子最底下一段 */
-  border-radius: var(--r-xs) var(--r-xs) 0 0; overflow: hidden;
+  border-radius: 7px 7px 2px 2px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(var(--shadow-c), .05);
   transform-origin: 50% 100%;
   animation: tm-grow-y .72s var(--ease-out) var(--d, 0ms) backwards;
+  transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease),
+              opacity var(--dur) var(--ease);
 }
 @keyframes tm-grow-y { from { transform: scaleY(.02); } }
-.ybar__seg { display: block; width: 100%; }
-/* 段与段之间的白色发丝线。不用 margin：那会让各段高度之和超过 100%。 */
-.ybar__seg + .ybar__seg { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6); }
-.ybar:hover .ybar__stack { filter: brightness(1.06); }
-/* 数值标签放在 .ybar__stack **外面**：stack 有 overflow:hidden，放里面会被裁掉 */
+/* 段顶一层柔光：每段自带由上而下的微高光，既出"立体感"又顺带分隔相邻段；
+   不再用生硬的白色描边（旧版 inset 0 1px 0 rgba(255,255,255,.6) 显廉价）。 */
+.ybar__seg {
+  display: block; width: 100%;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .2), rgba(255, 255, 255, 0) 58%);
+}
+.ybar:hover .ybar__stack { filter: brightness(1.07); transform: translateY(-2px); }
+/* 数值标签常驻：静止时低调（ink-2），hover/选中时点亮成主色；放 stack 外避免被 overflow 裁掉 */
 .ybar__cap {
   position: absolute; left: 50%; bottom: var(--h, 0%);
-  transform: translateX(-50%); margin-bottom: 4px;
-  font-size: 10px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums;
+  transform: translateX(-50%); margin-bottom: 5px;
+  font-size: 10px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums;
   white-space: nowrap; pointer-events: none;
-  opacity: 0; transition: opacity var(--dur) var(--ease);
 }
-.ybar:hover .ybar__cap, .ybar.is-active .ybar__cap { opacity: 1; }
+.ybar:hover .ybar__cap, .ybar.is-active .ybar__cap { color: var(--primary-ink); font-weight: 700; }
 .ybar.is-active::after {
-  content: ""; position: absolute; left: 1px; right: 1px; bottom: -5px; height: 2px;
-  border-radius: 2px; background: var(--primary);
+  content: ""; position: absolute; left: 50%; bottom: -6px;
+  width: 56%; height: 3px; border-radius: 3px;
+  background: var(--primary); transform: translateX(-50%);
 }
-.years.has-selection .ybar:not(.is-active) .ybar__stack { opacity: .42; }
-.years .ybar__stack { transition: opacity var(--dur) var(--ease); }
+.years.has-selection .ybar:not(.is-active) .ybar__stack { opacity: .4; }
 
-.years__labels { display: flex; gap: 6px; margin-top: 6px; }
+.years__labels { display: flex; gap: 7px; margin-top: 7px; justify-content: center; }
 .years__x {
-  flex: 1 1 0; min-width: 0; text-align: center;
+  flex: 1 1 0; min-width: 0; max-width: 46px; text-align: center;
   font-size: 10px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+.years__x.is-active { color: var(--primary-ink); font-weight: 700; }   /* JS 选中年份时点亮对应年份标签 */
 
 .years__detail { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-2); min-height: 54px; }
 .years__hint { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--ink-3); }
