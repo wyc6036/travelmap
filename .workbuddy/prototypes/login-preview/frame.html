@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>登录页 · frame</title>
+<!-- 直接复用主项目样式，保证预览与真实页面一致 -->
+<link rel="stylesheet" href="../../../web/css/tokens.css" />
+<link rel="stylesheet" href="../../../web/css/base.css" />
+<link rel="stylesheet" href="../../../web/css/components.css" />
+<link rel="stylesheet" href="../../../web/css/app.css" />
+</head>
+<body>
+  <!-- 内联图标 sprite（真实项目里在 index.html 顶部） -->
+  <svg class="svg-sprite" aria-hidden="true">
+    <defs>
+      <g id="i-pin"><path d="M20 10.5c0 6-8 11.5-8 11.5s-8-5.5-8-11.5a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10.3" r="2.8"/></g>
+    </defs>
+  </svg>
+
+  <!-- 与 web/index.html 中 #tm-login 完全一致的结构 -->
+  <div class="login" id="tm-login">
+    <div class="login__card">
+      <div class="login__logo">
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>
+      </div>
+      <h2 class="login__title">My Travel Map</h2>
+      <p class="login__sub">请输入访问密码</p>
+      <form id="tm-login-form" class="login__form" onsubmit="return false">
+        <input id="tm-login-password" type="password" class="login__input" placeholder="密码" autocomplete="current-password" />
+        <button type="submit" class="btn btn--primary login__btn">进入</button>
+        <p class="login__error" id="tm-login-error"></p>
+      </form>
+    </div>
+
+    <div class="login__art" aria-hidden="true">
+      <img src="../../../web/assets/travelmap_login_illustration.png" alt="" />
+    </div>
+  </div>
+</body>
+</html>

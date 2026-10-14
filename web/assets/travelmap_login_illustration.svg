@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="600" y1="40" x2="600" y2="650" gradientUnits="userSpaceOnUse"><stop stop-color="#F7F0E8"/><stop offset="1" stop-color="#E8F0EF"/></linearGradient>
+    <linearGradient id="hill1" x1="200" y1="400" x2="780" y2="730" gradientUnits="userSpaceOnUse"><stop stop-color="#D6E0D0"/><stop offset="1" stop-color="#B9CBBE"/></linearGradient>
+    <linearGradient id="hill2" x1="750" y1="420" x2="1150" y2="760" gradientUnits="userSpaceOnUse"><stop stop-color="#E6D8C4"/><stop offset="1" stop-color="#D6C6B0"/></linearGradient>
+    <linearGradient id="water" x1="420" y1="580" x2="760" y2="730" gradientUnits="userSpaceOnUse"><stop stop-color="#C4DDE0"/><stop offset="1" stop-color="#9FBFC9"/></linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8F3EB"/></linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#887B69" flood-opacity=".13"/></filter>
+    <clipPath id="photoA"><rect x="155" y="266" width="235" height="154" rx="14"/></clipPath>
+    <clipPath id="photoB"><rect x="810" y="310" width="222" height="146" rx="14"/></clipPath>
+  </defs>
+  <rect width="1200" height="820" rx="28" fill="url(#sky)"/>
+  <!-- soft clouds -->
+  <g fill="#FFFDF8" opacity=".82"><path d="M130 155c-1-22 18-39 41-35 9-28 47-31 61-5 25-6 47 13 43 36H130Z"/><path d="M855 118c0-19 16-34 35-31 8-24 39-27 51-4 21-5 39 11 36 30H855Z"/></g>
+  <g stroke="#D6CBB9" stroke-width="2" stroke-linecap="round" opacity=".8"><path d="M75 227h155"/><path d="M955 206h118"/><path d="M1000 217h54"/></g>
+  <!-- distant mountains -->
+  <path d="M0 500 130 365 218 438 350 300 480 450 585 355 735 490 855 350 1010 470 1110 382 1200 455V820H0Z" fill="#D9E1D8"/>
+  <path d="m276 380 74-80 75 87-46-19-29 19-27-16-24 16Z" fill="#F8F4EB" opacity=".9"/>
+  <path d="m796 412 59-62 68 79-38-18-25 15-27-15-19 10Z" fill="#F8F4EB" opacity=".9"/>
+  <!-- rolling hills -->
+  <path d="M0 558c116-82 232-68 343-8 99 54 173 54 276-9 121-74 228-54 326 11 99 66 164 60 255 12v256H0Z" fill="url(#hill1)"/>
+  <path d="M550 602c118-84 224-112 335-63 108 47 191 46 315-23v304H450Z" fill="url(#hill2)"/>
+  <!-- lake -->
+  <path d="M328 652c75-46 147-41 219-14 47 17 96 17 147-2 36-14 71-11 107 7-46 69-112 104-211 112-113 10-198-24-262-103Z" fill="url(#water)"/>
+  <g stroke="#F5F7F2" stroke-width="3" stroke-linecap="round" opacity=".75"><path d="M420 682c47-12 84-10 122 2"/><path d="M530 711c42 4 77 1 110-11"/><path d="M390 665c20-7 37-8 55-5"/></g>
+  <!-- little trail winding through landscape -->
+  <path d="M90 688c85-83 155-23 214-70s71-113 143-109 91 84 163 45 87-114 162-89 73 91 143 56 78-85 153-58" stroke="#FFF9EF" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 13"/>
+  <path d="M90 688c85-83 155-23 214-70s71-113 143-109 91 84 163 45 87-114 162-89 73 91 143 56 78-85 153-58" stroke="#9DB4C4" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2 13"/>
+  <!-- trees -->
+  <g fill="#788B6C"><path d="M70 674 99 608l29 66H70Z"/><path d="M54 695 83 630l29 65H54Z"/><path d="M104 701 130 642l26 59h-52Z"/><path d="M1080 651 1112 579l32 72h-64Z"/><path d="M1060 682 1086 622l26 60h-52Z"/><path d="M1113 690 1142 625l29 65h-58Z"/></g>
+  <g fill="#9BAA8C"><path d="M85 650 99 618l14 32H85Z"/><path d="M1092 635 1112 590l20 45h-40Z"/></g>
+  <g stroke="#8D806F" stroke-width="5" stroke-linecap="round"><path d="M99 674v34"/><path d="M130 701v22"/><path d="M1112 651v38"/></g>
+  <!-- floating location marker -->
+  <g transform="translate(596 285)" filter="url(#shadow)"><path d="M0 0c-31 0-56 25-56 56 0 43 56 100 56 100S56 99 56 56C56 25 31 0 0 0Z" fill="#7D9FC5"/><circle cy="55" r="24" fill="#F9F5ED"/><circle cy="55" r="10" fill="#7D9FC5"/><circle cy="55" r="4" fill="#F9F5ED"/></g>
+  <!-- tiny airplane and dotted route -->
+  <path d="M675 245c36-18 64-25 95-11 25 12 43 8 60-7" stroke="#8EA9C3" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="3 9"/>
+  <g transform="translate(824 219) rotate(18)" fill="#7D9FC5"><path d="M0 10 47 0 35 12 48 22 42 25 25 17 12 25 10 21 18 14 0 13Z"/></g>
+  <!-- photo memory card left -->
+  <g filter="url(#shadow)" transform="rotate(-5 272 330)">
+    <rect x="139" y="245" width="267" height="224" rx="20" fill="url(#card)" stroke="#E8DFD3"/>
+    <g clip-path="url(#photoA)"><rect x="155" y="266" width="235" height="154" fill="#C8D9D8"/><path d="M155 345 211 292l43 43 39-58 97 79v64H155Z" fill="#8BA69A"/><path d="m235 330 58-53 50 55 47 13v75H155v-42Z" fill="#6F8C7B"/><path d="m274 303 19-26 25 27-17-8-9 9-8-6Z" fill="#F8F4E9"/><path d="M155 380c43-25 81-10 112 4 40 18 77 11 123-9v45H155Z" fill="#A8C9D0"/><path d="M178 390h73m-42 12h98" stroke="#DCE9E6" stroke-width="3" stroke-linecap="round"/></g>
+    <circle cx="164" cy="443" r="4" fill="#D9A17D"/><text x="178" y="448" font-family="Georgia,serif" font-size="16" fill="#514D45">A day to remember</text>
+    <text x="158" y="459" font-family="Arial,sans-serif" font-size="9" fill="#A59A8C" letter-spacing="1.2">TRAVEL MEMORY · 2026</text>
+  </g>
+  <!-- photo memory card right -->
+  <g filter="url(#shadow)" transform="rotate(5 921 385)">
+    <rect x="792" y="286" width="254" height="210" rx="20" fill="url(#card)" stroke="#E8DFD3"/>
+    <g clip-path="url(#photoB)"><rect x="810" y="310" width="222" height="146" fill="#BFD2D8"/><circle cx="974" cy="339" r="22" fill="#F6E3B3"/><path d="M810 400 862 342l39 40 43-50 88 70v54H810Z" fill="#839C90"/><path d="m862 342 20 19 19 21 43-50 24 20-26-4-18 15-22-4-20 10Z" fill="#F7F3E9"/><path d="M810 422c45-22 84-17 116 0 36 18 68 14 106-4v38H810Z" fill="#8CB4C2"/><path d="M832 438h55m24 0h61" stroke="#D7E8E6" stroke-width="3" stroke-linecap="round"/></g>
+    <text x="812" y="478" font-family="Georgia,serif" font-size="15" fill="#514D45">Somewhere, someday</text>
+  </g>
+  <!-- small journal / ticket -->
+  <g filter="url(#shadow)" transform="rotate(7 691 550)"><rect x="648" y="501" width="108" height="132" rx="12" fill="#FFFDF8" stroke="#E6DCCE"/><path d="M665 524h73M665 539h60M665 554h68M665 569h46" stroke="#D9D0C4" stroke-width="2.5" stroke-linecap="round"/><path d="M681 595c8-13 19-13 27 0s19 13 27 0" stroke="#D6A17C" stroke-width="3" stroke-linecap="round"/><text x="665" y="615" font-family="Georgia,serif" font-size="10" fill="#9A8E7D" letter-spacing="1">POSTCARD</text></g>
+  <!-- subtle foreground flowers -->
+  <g stroke="#829777" stroke-width="2" stroke-linecap="round"><path d="M225 743v-28m0 13-10-8m10 15 10-9"/><path d="M970 746v-24m0 10-9-7m9 14 8-7"/></g>
+  <g fill="#D7A17F"><circle cx="225" cy="710" r="5"/><circle cx="970" cy="718" r="5"/></g>
+  <g fill="#F2DDA9"><circle cx="215" cy="711" r="3"/><circle cx="235" cy="711" r="3"/><circle cx="960" cy="719" r="3"/><circle cx="980" cy="719" r="3"/></g>
+</svg>

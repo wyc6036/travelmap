@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>护照印章墙 · 国家剪影版（生成式，无图片素材）</title>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;background:radial-gradient(120% 90% at 50% 0%,#fbf7ef,#ece1cf 72%);
+       font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;color:#4a4137;}
+  h1{font-size:16px;font-weight:700;margin:22px auto 4px;max-width:772px;padding:0 6px;}
+  p.note{font-size:12px;color:#7d7365;margin:0 auto 18px;line-height:1.65;max-width:772px;padding:0 6px;}
+  .page{max-width:772px;background:linear-gradient(180deg,#f8f2e7,#f2e9db);border:1px solid #ddcfb6;border-radius:14px;
+        margin:0 auto 30px;padding:22px 22px 26px;
+        box-shadow:0 6px 22px rgba(74,60,44,.14), inset 0 0 0 1px rgba(255,255,255,.55);}
+  .page h2{font-size:12px;letter-spacing:2.5px;color:#8a7d68;font-weight:700;margin:0 0 20px;text-transform:uppercase;}
+  .grid{display:grid;grid-template-columns:repeat(4,148px);gap:26px 22px;justify-content:center;}
+  .stamp{width:148px;height:148px;filter:drop-shadow(0 3px 4px rgba(74,60,44,.18));}
+  .stamp svg{width:100%;height:100%;overflow:visible;}
+  .ink{mix-blend-mode:multiply;}
+  .lbl-cn{font-weight:800;}
+  .lbl-city{font-family:Georgia,"Times New Roman",serif;letter-spacing:.3px;font-weight:700;}
+</style>
+</head>
+<body>
+<h1>护照印章墙 · 国家剪影版（全部由代码生成，无手绘 / 无图片素材）</h1>
+<p class="note">每枚 = 独立剪影外框（含虚点内边框）× <b>真实国家轮廓（取自 Natural Earth 110m 地图数据）</b> × 国家·城市标签 × 各国专属墨色 × 固定随机歪斜 + 程序化墨水噪点。轮廓由经纬度直接投影成矢量路径（日/希等群岛国保留主要岛屿），调参即可换风格 / 换国家。</p>
+<div class="page">
+  <h2>Passport · Stamps</h2>
+  <div class="grid" id="grid"></div>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <filter id="ink" x="-25%" y="-25%" width="150%" height="150%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="11" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="1.5"/>
+  </filter>
+</svg>
+
+<script>
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+const rot = s => (hash(s)%13)-6;
+
+/* ---------- 外框剪影：统一占 y14..88 / x16..84，只改轮廓 ---------- */
+__FRAMES__
+
+/* ---------- 国家轮廓：真实地图剪影（Natural Earth 110m） ---------- */
+__SIL__
+
+__DATA__
+
+function stampSVG(d){
+  const r = rot(d.city+d.cn);
+  return `
+  <div class="stamp" style="transform:rotate(${r}deg)">
+  <svg viewBox="-5 -5 110 110">
+    <g class="ink">
+      <path d="${FRAMES[d.frame]}" fill="${d.ink}" fill-opacity="0.07" stroke="none"/>
+      <path d="${FRAMES[d.frame]}" fill="none" stroke="${d.ink}" stroke-width="3.2" filter="url(#ink)"/>
+      <path d="${FRAMES[d.frame]}" transform="translate(50 51) scale(0.85) translate(-50 -51)"
+            fill="none" stroke="${d.ink}" stroke-width="1.8" stroke-dasharray="1.2 4"
+            stroke-opacity="0.9" filter="url(#ink)"/>
+      <path d="${SIL[d.cn]}" fill="${d.ink}" fill-opacity="0.85" stroke="${d.ink}"
+            stroke-width="0.6" stroke-opacity="0.9" filter="url(#ink)"/>
+      <path d="M38 62 H62" stroke="${d.ink}" stroke-width="1.4" stroke-opacity="0.65" fill="none"/>
+      <text class="lbl-cn" x="50" y="69.8" fill="${d.ink}" font-size="12.5" text-anchor="middle">${d.cn}</text>
+      <text class="lbl-city" x="50" y="76.2" fill="${d.ink}" font-size="5.4" text-anchor="middle" opacity="0.9">${d.city} · ${d.yr}</text>
+    </g>
+  </svg>
+  </div>`;
+}
+document.getElementById('grid').innerHTML = DATA.map(stampSVG).join('');
+</script>
+</body>
+</html>
