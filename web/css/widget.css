@@ -1,0 +1,105 @@
+/* =========================================================
+   widget.css · 首页可编辑小组件磁贴网格（iOS 风格）
+   ---------------------------------------------------------
+   列数固定（--cols）+ 基准行高（--cell-h），组件只占整数格
+   （1×1 / 2×1 / 1×2 / 2×2 / 3×2，列×行）→ 调整后始终对齐。
+   ========================================================= */
+:root { --cols: 4; --cell-h: 230px; }
+
+.grid--main {
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  grid-auto-rows: var(--cell-h);
+  align-items: stretch;
+}
+
+/* 组件卡本体是 .card（已在 components.css 设为纵向 flex），
+   这里只补 body 的内部滚动，让内容超出格高时可滚动而不撑破网格。
+   ⚠️ 关键：消费 ui.js 在元素上写的 --w / --h，让卡片真正跨格。
+   之前只设了变量却没有 span 规则，导致无论默认还是改尺寸都是 1×1。 */
+.widget {
+  position: relative;
+  grid-column: span var(--w, 1);
+  grid-row: span var(--h, 1);
+}
+.widget__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+/* 编辑态工具栏：默认隐藏，进入编辑态才显示 */
+.widget__tools {
+  position: absolute; top: 8px; right: 8px; z-index: 6;
+  display: none; gap: 6px;
+}
+.grid--main.is-editing .widget__tools { display: flex; }
+
+/* 编辑态下，模块卡头自带的功能按钮（查看全部 / 换一批 等）与编辑工具栏
+   同占卡头右上角，会叠在一起（用户反馈）。编辑态本就不操作模块功能：
+   用 visibility 隐藏（保留占位 → 退出编辑时布局不跳动）并禁掉点击。
+   ⚠️ 注意 .tabs 不在隐藏名单里：模块名要保留（用户要求编辑时仍能看出
+   这是哪个模块）——「最近足迹」等组件的卡头是页签式 .tabs，第一个页签
+   就是模块名，藏掉整组名字就没了。编辑态只藏筛选页签、保留第一个，
+   且整组禁点，避免编辑中误切换筛选。 */
+.grid--main.is-editing .widget__head :is(.link, .btn, .card__actions) {
+  visibility: hidden;
+  pointer-events: none;
+}
+.grid--main.is-editing .widget__head .tabs { pointer-events: none; }
+.grid--main.is-editing .widget__head .tabs .tabs__btn:not(:first-child) { visibility: hidden; }
+.widget__btn {
+  width: 26px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-soft); background: var(--surface);
+  border-radius: 8px; color: var(--ink-2); cursor: pointer;
+}
+.widget__btn:hover { background: var(--bg-warm); color: var(--ink); }
+.widget__size { font-size: 11px; font-weight: 600; line-height: 1; }
+
+/* 编辑态：卡片抖动 + 抓取光标 */
+@keyframes wj-shake {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25%      { transform: translate(-1px, 1px) rotate(-.4deg); }
+  50%      { transform: translate(1px, -1px) rotate(.4deg); }
+  75%      { transform: translate(-1px, -1px) rotate(-.3deg); }
+}
+.grid--main.is-editing .widget.is-shaking { animation: wj-shake .35s ease-in-out infinite; }
+.grid--main.is-editing .widget { cursor: grab; }
+.grid--main.is-editing .widget:active { cursor: grabbing; }
+
+/* 尺寸快捷菜单（5 种离散尺寸） */
+.wj-menu {
+  position: fixed; z-index: 80;
+  background: var(--surface);
+  border: 1px solid var(--line-soft); border-radius: 12px;
+  padding: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); min-width: 104px;
+}
+.wj-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 7px 10px; border: 0; background: transparent;
+  border-radius: 8px; font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.wj-menu button:hover:not([disabled]) { background: var(--bg-warm); }
+.wj-menu button[disabled] { color: var(--ink-3); cursor: not-allowed; }
+
+/* 替换 / 新增 底部弹窗（iOS 风格 sheet） */
+.wj-sheet-mask { position: fixed; inset: 0; background: rgba(20, 24, 33, .32); z-index: 90; }
+.wj-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 91;
+  background: var(--surface); border-radius: 16px 16px 0 0;
+  padding: 8px 14px calc(14px + env(safe-area-inset-bottom));
+  transform: translateY(110%); transition: transform .24s ease;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, .18);
+}
+.wj-sheet.is-open { transform: translateY(0); }
+.wj-sheet__head { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px 10px; }
+.wj-sheet__title { font-size: 15px; font-weight: 600; }
+.wj-sheet__body {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px; max-height: 46vh; overflow-y: auto;
+}
+.wj-sheet__item {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 14px 12px; border: 1px solid var(--line-soft);
+  border-radius: 12px; background: var(--surface-2); cursor: pointer; text-align: left;
+}
+.wj-sheet__item:hover:not([disabled]) { border-color: var(--primary-ink); }
+.wj-sheet__item.is-disabled { opacity: .45; cursor: not-allowed; }
+.wj-sheet__name { font-size: 14px; font-weight: 500; color: var(--ink); }
+.wj-sheet__size { font-size: 12px; color: var(--ink-2); }

@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="./css/layout.css" />
 <link rel="stylesheet" href="./css/modal.css" />
 <link rel="stylesheet" href="./css/app.css" />
+<link rel="stylesheet" href="./css/widget.css" />
 
 <script>
 /* 以 file:// 直接打开时，浏览器会拦截 fetch 与 ES Module，控制台会刷一片报错。
@@ -157,6 +158,9 @@ if (location.protocol === 'file:') {
           <button class="btn btn--icon" id="tm-style-toggle" title="切换底图样式" aria-label="切换底图样式">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-globe"/></svg>
           </button>
+          <button class="btn btn--ghost" id="tm-edit-widgets" title="编辑首页模块">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑模块
+          </button>
           <button class="btn btn--primary" id="tm-add">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>记录新足迹
           </button>
@@ -226,86 +230,11 @@ if (location.protocol === 'file:') {
           <div class="mapcard__status" id="tm-map-status" hidden></div>
         </div>
 
-        <!-- 左列：最近足迹 + 愿望清单 + 我的记录（上下叠放） ｜ 右列：旅途海报（两列等高）
-             2026-10-06 改版：右列原来是「选中地点详情」卡（点图钉才更新，静止时大半时间是
-             「选择一处足迹」的占位态，占着最大的一块地方却没内容），换成海报墙 ——
-             从全部多媒体里随机抽，尺寸不等、各自随机翻牌替换。 -->
-        <div class="grid grid--main">
-          <div class="maincol">
-              <section class="card" id="tm-card-recent">
-              <div class="card__head card__head--spread">
-                <div class="tabs" id="tm-recent-tabs" role="tablist">
-                  <button class="tabs__btn is-active" data-media="all" role="tab">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-pin"/></svg>最近足迹
-                  </button>
-                  <button class="tabs__btn" data-media="image" role="tab">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-image"/></svg>照片
-                  </button>
-                  <button class="tabs__btn" data-media="video" role="tab">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-video"/></svg>视频
-                  </button>
-                  <button class="tabs__btn" data-media="text" role="tab">
-                    <svg class="ico" viewBox="0 0 24 24"><use href="#i-note"/></svg>笔记
-                  </button>
-                </div>
-                <button class="link" data-view="footprints">查看全部
-                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
-                </button>
-              </div>
-              <div class="card__body">
-                <div class="strip" id="tm-recent-grid"></div>
-              </div>
-            </section>
+        <!-- 地图页下半区：iOS 风格可编辑小组件网格（磁贴）。
+             卡片由 js/ui.js 的 Widget 注册表按浏览器存储的 layout 动态生成；
+             点右上角「编辑模块」进入编辑态：抖动 + 尺寸调整(1×1/2×1/1×2/2×2/3×2) + 替换 + 移除 + 拖拽重排。 -->
+        <div class="grid grid--main" id="tm-widget-grid"></div>
 
-            <!-- 愿望清单预览：原在 grid--minor（与「我的记录」并排），
-                 改版后上移到左列、叠在「最近足迹」下面。 -->
-            <section class="card" id="tm-card-wishlist">
-              <div class="card__head card__head--spread">
-                <h3 class="card__title">愿望清单</h3>
-                <button class="link" data-view="wishlist">查看全部
-                  <span class="muted" id="tm-wish-total">(0)</span>
-                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
-                </button>
-              </div>
-              <div class="card__body">
-                <div class="strip" id="tm-strip-wishlist"></div>
-              </div>
-            </section>
-
-            <!-- 我的记录：2026-10-06 也上移到左列（原来单独占下面一整行），
-                 这样下半区只有两列：左列三张卡叠放 ｜ 右列一张海报墙。 -->
-            <section class="card" id="tm-card-collections">
-              <div class="card__head card__head--spread">
-                <h3 class="card__title">我的记录</h3>
-                <button class="link" data-view="collections">查看全部
-                  <span class="muted" id="tm-coll-total">(0)</span>
-                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
-                </button>
-              </div>
-              <div class="card__body">
-                <div class="strip" id="tm-strip-collections"></div>
-              </div>
-            </section>
-          </div>
-
-          <!-- 旅途海报：多张同时陈列，尺寸不等，各自随机翻牌；视频只取首帧当封面。
-               块数 / 格子比例 / 翻牌间隔见 css/poster.css 与 js/poster.js。 -->
-          <section class="card card--poster" id="tm-card-poster">
-            <div class="card__head card__head--spread">
-              <h3 class="card__title">旅途海报</h3>
-              <div class="card__actions">
-                <button class="btn btn--pill" id="tm-poster-shuffle">换一批</button>
-                <button class="link" data-view="collections">查看全部
-                  <span class="muted" id="tm-poster-total">(0)</span>
-                  <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
-                </button>
-              </div>
-            </div>
-            <div class="card__body">
-              <div class="posterwall" id="tm-poster-wall"></div>
-            </div>
-          </section>
-        </div>
       </section>
 
       <!-- ============ 其余视图 ============ -->
@@ -752,6 +681,18 @@ if (location.protocol === 'file:') {
   </div>
 </div>
 
+<!-- ================= 组件替换 / 新增 底部弹窗 ================= -->
+<div class="wj-sheet-mask" id="tm-widget-sheet-mask" hidden></div>
+<div class="wj-sheet" id="tm-widget-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="tm-widget-sheet-title">
+  <div class="wj-sheet__head">
+    <span class="wj-sheet__title" id="tm-widget-sheet-title">替换组件</span>
+    <button class="modal__close" id="tm-widget-sheet-close" aria-label="关闭">
+      <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <div class="wj-sheet__body" id="tm-widget-sheet-body"></div>
+</div>
+
 <!-- ================= 启动 / 错误遮罩 ================= -->
 <div class="boot" id="tm-boot">
   <div class="boot__spinner"></div>
@@ -777,6 +718,8 @@ if (location.protocol === 'file:') {
   </p>
 </div>
 
+<!-- 拖拽重排（编辑态）：全局 UMD，挂载到 window.Sortable，与现有 unpkg 依赖风格一致 -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script type="module" src="./js/main.js"></script>
 <script>
 /* file:// 兜底提示：ES Module 会静默失败，这里给出人话解释 */

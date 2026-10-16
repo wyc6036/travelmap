@@ -190,18 +190,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     userPct: '#tm-user-pct',
     userBar: '#tm-user-bar',
 
-    recentTabs: '#tm-recent-tabs',
-    recentGrid: '#tm-recent-grid',
     status: '#tm-status',
-
-    collTotal: '#tm-coll-total',
-    stripCollections: '#tm-strip-collections',
-    wishTotal: '#tm-wish-total',
-    stripWishlist: '#tm-strip-wishlist',
-
-    posterWall: '#tm-poster-wall',
-    posterTotal: '#tm-poster-total',
-    posterShuffle: '#tm-poster-shuffle',
 
     collFilter: '#tm-coll-filter',
     viewFootprints: '#tm-view-footprints',
@@ -218,13 +207,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
      状态若只存在 DOM 里，10 秒一轮的自动同步就会把它抹掉（见 tripGroupRow）。 */
   const expandedTrips = new Set();
 
-  /* 旅途海报：整墙的翻牌逻辑在 js/poster.js，这里只负责喂素材池 + 桥接点击。
-     ⚠️ 点海报上的照片 → 直接进照片查看页（lightbox），不再弹地点详情弹窗。 */
-  const poster = createPoster({
-    root: dom.posterWall,
-    onOpen: (place, item) => onOpenPhoto?.(place, item),
-  });
-  dom.posterShuffle?.addEventListener('click', () => poster.shuffle());
+  /* 旅途海报改由 Widget 注册表里的 poster 组件按需创建（见下方 Widget 系统）。
+     这里不再持有全局 poster 实例。 */
 
   /* 记录页筛选条：常驻顶部（sticky）；玻璃带强度随滚动进度渐显。
      把 p∈[0,1] 写进 CSS 变量 --coll-p，由 CSS 负责「模糊 + 底部渐隐」的表现
@@ -335,20 +319,20 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     };
   }
 
-  /* ---------- 地图视图下半区 ---------- */
-  function renderRecent(mediaFilter = 'all') {
-    const grid = dom.recentGrid;
+  /* ---------- 地图视图下半区（Widget 用：接收目标容器） ---------- */
+  function paintRecent(grid, mediaFilter = 'all') {
+    if (!grid) return;
     grid.innerHTML = '';
     const stats = computeStats();
 
     if (mediaFilter === 'all') {
-      stats.past.slice(0, 3).forEach((p) => grid.append(placeCard(p, { onOpen: onOpenDetail })));
+      stats.past.slice(0, 6).forEach((p) => grid.append(placeCard(p, { onOpen: onOpenDetail })));
     } else {
       const items = [];
       for (const p of stats.past) {
         for (const m of p.media) if (m.type === mediaFilter) items.push({ p, m });
       }
-      items.slice(0, 3).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
+      items.slice(0, 6).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
       if (!items.length) {
         grid.innerHTML = emptyState(`还没有${MEDIA_LABELS[mediaFilter]}`, '打开地点详情，用「添加媒体」上传即可');
       }
@@ -399,25 +383,22 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       .sort((a, b) => (a.dateTs || Infinity) - (b.dateTs || Infinity));
   }
 
-  function renderStrips() {
-    const stats = computeStats();
+  function paintWishlist(stripEl, totalEl) {
+    const wish = wishlistPlaces();
+    (stripEl || (stripEl = document.createElement('div'))).innerHTML = '';
+    wish.slice(0, 6).forEach((p) => stripEl.append(placeCard(p, { onOpen: onOpenDetail })));
+    if (!wish.length) stripEl.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
+    if (totalEl) totalEl.textContent = `(${wish.length})`;
+  }
 
-    // 我的记录：最近的多媒体（图/视频/笔记各取一些，按地点时间排）
-    dom.stripCollections.innerHTML = '';
+  function paintCollections(stripEl, totalEl) {
+    const stats = computeStats();
     const mediaPool = [];
     for (const p of stats.past) for (const m of p.media) mediaPool.push({ p, m });
-    mediaPool.slice(0, 6).forEach(({ p, m }) => {
-      dom.stripCollections.append(mediaCard(m, p, { onOpen: onOpenPhoto }));
-    });
-    if (!mediaPool.length) dom.stripCollections.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里');
-    dom.collTotal.textContent = `(${stats.media.total})`;
-
-    // 愿望清单预览（原「最近旅程」条带的位置）
-    dom.stripWishlist.innerHTML = '';
-    const wish = wishlistPlaces();
-    wish.slice(0, 6).forEach((p) => dom.stripWishlist.append(placeCard(p, { onOpen: onOpenDetail })));
-    if (!wish.length) dom.stripWishlist.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
-    dom.wishTotal.textContent = `(${wish.length})`;
+    (stripEl || (stripEl = document.createElement('div'))).innerHTML = '';
+    mediaPool.slice(0, 6).forEach(({ p, m }) => stripEl.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
+    if (!mediaPool.length) stripEl.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里');
+    if (totalEl) totalEl.textContent = `(${stats.media.total})`;
   }
 
   /* ---------- 其它视图 ---------- */
@@ -885,12 +866,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     dom.userPct.textContent = `${stats.pct.toFixed(1)}%`;
     requestAnimationFrame(() => { dom.userBar.style.width = `${Math.min(100, stats.pct)}%`; });
 
-    renderRecent(dom.recentTabs.querySelector('.tabs__btn.is-active')?.dataset.media || 'all');
-    renderStrips();
-
-    // 海报墙：只在第一次灌满五块（之后的数据同步只换池子，不动正在看的画面，见 poster.js）
-    poster.setMedia(posterPool());
-    dom.posterTotal.textContent = `(${stats.media.total})`;
+    // 首页小组件网格（Widget 注册表渲染，见下方 Widget 系统）
+    renderHome();
 
     if (currentView === 'footprints') renderFootprintsView();
     if (currentView === 'collections') renderCollectionsView();
@@ -927,14 +904,6 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
      而分组每次重渲染本来就要重建按钮，顺手绑一下更直接。
      ⚠️ 箭头与 `.tl__hit` 是**兄弟**，不是嵌套 —— 箭头 z-index 更高，
         点箭头不会碰到"打开"那层，所以这里也不需要 stopPropagation。 */
-
-  dom.recentTabs.addEventListener('click', (e) => {
-    const btn = e.target.closest('.tabs__btn');
-    if (!btn) return;
-    dom.recentTabs.querySelectorAll('.tabs__btn').forEach((b) => b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    renderRecent(btn.dataset.media);
-  });
 
   // 记录视图的筛选 chips（只建一次）
   // ⚠️ 2026-10-06 起这是**唯一**的分类筛选入口：侧栏那三个子项已去掉，
@@ -985,6 +954,381 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
   });
 
   // （原「选中地点详情」卡的两个按钮随卡片一起删掉了：卡片已被旅途海报取代）
+
+  /* =========================================================
+   * 首页小组件系统（iOS 风格可编辑磁贴）
+   * ---------------------------------------------------------
+   * - 组件由 WIDGET_DEFS 注册；每个组件 mount(head, body) 填充卡头与卡体，返回 { update, destroy? }。
+   * - layout = [{type, size}]，size 为离散格数 'WxH'（列×行），可选 1x1 / 2x1 / 1x2 / 2x2 / 3x2。
+   * - 网格列数固定（桌面4 / 中屏2 / 窄屏1），组件只占整数格 → 调整后始终对齐。
+   * - 编辑态：顶栏「编辑模块」↔「完成」；每卡出工具栏（尺寸 / 替换 / 移除）；SortableJS 拖拽重排。
+   * - 布局存浏览器（STORAGE_KEY），启动读取，缺失回退 DEFAULT_LAYOUT。
+   * ========================================================= */
+  const STORAGE_KEY = 'travelmap.layout.v1';
+  const GRID_SIZES = ['1x1', '2x1', '1x2', '2x2', '3x2'];
+  const DEFAULT_LAYOUT = [
+    { type: 'recent', size: '2x1' },
+    { type: 'wishlist', size: '1x1' },
+    { type: 'collections', size: '1x1' },
+    { type: 'poster', size: '2x2' },
+  ];
+
+  function currentCols() {
+    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cols'), 10);
+    return Number.isFinite(v) && v > 0 ? v : 4;
+  }
+  function parseSize(sz) {
+    const [w, h] = String(sz || '1x1').split('x').map(Number);
+    return { w: Math.max(1, w || 1), h: Math.max(1, h || 1) };
+  }
+  /** 列数不足时把宽度 clamp 到可用列数，保证不溢出 */
+  function clampSize(sz) {
+    const { w, h } = parseSize(sz);
+    return `${Math.min(w, currentCols())}x${h}`;
+  }
+
+  /* 已实现的 4 个组件 + 4 个占位（第二阶段） */
+  const WIDGET_DEFS = {
+    recent: {
+      title: '最近足迹', defaultSize: '2x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <div class="tabs" role="tablist">
+            ${['all', 'image', 'video', 'text'].map((t) => `
+              <button class="tabs__btn${t === 'all' ? ' is-active' : ''}" data-media="${t}" role="tab">
+                ${icon(t === 'all' ? 'pin' : t, 'ico')}${t === 'all' ? '最近足迹' : MEDIA_LABELS[t]}
+              </button>`).join('')}
+          </div>
+          <button class="link" data-view="footprints">查看全部
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('mediagrid');
+        const w = { activeMedia: 'all' };
+        const tabs = head.querySelector('.tabs');
+        tabs.addEventListener('click', (e) => {
+          const b = e.target.closest('.tabs__btn'); if (!b) return;
+          tabs.querySelectorAll('.tabs__btn').forEach((x) => x.classList.remove('is-active'));
+          b.classList.add('is-active');
+          w.activeMedia = b.dataset.media;
+          paintRecent(body, w.activeMedia);
+        });
+        head.querySelector('[data-view="footprints"]').addEventListener('click', () => setView('footprints'));
+        return { update() { paintRecent(body, w.activeMedia); } };
+      },
+    },
+    wishlist: {
+      title: '愿望清单', defaultSize: '1x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">愿望清单</h3>
+          <button class="link" data-view="wishlist">查看全部 <span class="muted" data-role="total">(0)</span>
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('strip');
+        head.querySelector('[data-view="wishlist"]').addEventListener('click', () => setView('wishlist'));
+        return {
+          update() {
+            const wish = wishlistPlaces();
+            body.innerHTML = '';
+            wish.slice(0, 6).forEach((p) => body.append(placeCard(p, { onOpen: onOpenDetail })));
+            if (!wish.length) body.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
+            head.querySelector('[data-role="total"]').textContent = `(${wish.length})`;
+          },
+        };
+      },
+    },
+    collections: {
+      title: '我的记录', defaultSize: '1x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">我的记录</h3>
+          <button class="link" data-view="collections">查看全部 <span class="muted" data-role="total">(0)</span>
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('strip');
+        head.querySelector('[data-view="collections"]').addEventListener('click', () => setView('collections'));
+        return {
+          update() {
+            const stats = computeStats();
+            const pool = [];
+            for (const p of stats.past) for (const m of p.media) pool.push({ p, m });
+            body.innerHTML = '';
+            pool.slice(0, 6).forEach(({ p, m }) => body.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
+            if (!pool.length) body.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里');
+            head.querySelector('[data-role="total"]').textContent = `(${stats.media.total})`;
+          },
+        };
+      },
+    },
+    poster: {
+      title: '旅途海报', defaultSize: '2x2',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">旅途海报</h3>
+          <div class="card__actions">
+            <button class="btn btn--pill" data-role="shuffle">换一批</button>
+            <button class="link" data-view="collections">查看全部 <span class="muted" data-role="total">(0)</span>
+              <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+            </button>
+          </div>`;
+        body.classList.add('posterwall');
+        const posterApi = createPoster({ root: body, onOpen: (place, item) => onOpenPhoto?.(place, item) });
+        head.querySelector('[data-role="shuffle"]').addEventListener('click', () => posterApi.shuffle());
+        head.querySelector('[data-view="collections"]').addEventListener('click', () => setView('collections'));
+        return {
+          update() {
+            posterApi.setMedia(posterPool());
+            const stats = computeStats();
+            head.querySelector('[data-role="total"]').textContent = `(${stats.media.total})`;
+          },
+          destroy() { posterApi.destroy(); },
+        };
+      },
+    },
+    // —— 以下 4 个新组件第二阶段实现，先占位（comingSoon，替换弹窗里置灰）——
+    pending:     { title: '待整理照片', defaultSize: '1x1', comingSoon: true },
+    lastTrip:    { title: '最近一次旅行', defaultSize: '2x1', comingSoon: true },
+    roulette:    { title: '抽签下一站', defaultSize: '1x1', comingSoon: true },
+    month:       { title: '你最爱几月出发', defaultSize: '2x1', comingSoon: true },
+  };
+
+  const gridEl = document.getElementById('tm-widget-grid');
+  const editBtn = document.getElementById('tm-edit-widgets');
+  let layout = loadLayout() || DEFAULT_LAYOUT.map((s) => ({ ...s }));
+  let editing = false;
+  let slots = [];
+  let dragMoved = false;   // 刚结束拖拽时为 true，避免拖完组件后的点击被当成"点空白保存"
+  let sortable = null;
+
+  function loadLayout() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || !arr.length) return null;
+      return arr.filter((s) => WIDGET_DEFS[s.type] && !WIDGET_DEFS[s.type].comingSoon);
+    } catch (_) { return null; }
+  }
+  function persistLayout() {
+    syncLayoutFromDom();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(layout)); } catch (_) {}
+  }
+  function syncLayoutFromDom() {
+    const order = [...gridEl.querySelectorAll('.widget')].map((el) => ({
+      type: el.dataset.type,
+      size: clampSize(el.dataset.size || WIDGET_DEFS[el.dataset.type].defaultSize),
+    }));
+    layout = order;
+  }
+  function applySize(rec) {
+    const sz = clampSize(rec.size || WIDGET_DEFS[rec.type].defaultSize);
+    rec.size = sz;
+    const { w, h } = parseSize(sz);
+    rec.el.style.setProperty('--w', w);
+    rec.el.style.setProperty('--h', h);
+    rec.el.dataset.size = sz;
+    const lbl = rec.el.querySelector('.widget__size');
+    if (lbl) lbl.textContent = `${w}×${h}`;
+  }
+
+  function buildGrid() {
+    destroySortable();
+    slots.forEach((s) => s.api && s.api.destroy && s.api.destroy());
+    gridEl.innerHTML = '';
+    slots = [];
+    layout.forEach((slot) => {
+      const def = WIDGET_DEFS[slot.type];
+      if (!def || def.comingSoon) return;
+      const el = document.createElement('section');
+      el.className = 'card widget';
+      el.dataset.type = slot.type;
+      const tools = document.createElement('div');
+      tools.className = 'widget__tools';
+      tools.innerHTML = `
+        <button class="widget__btn widget__size" type="button" title="调整尺寸"></button>
+        <button class="widget__btn widget__replace" type="button" title="替换组件">${icon('edit', 'ico ico--sm')}</button>
+        <button class="widget__btn widget__remove" type="button" title="移除">${icon('minus', 'ico ico--sm')}</button>`;
+      const head = document.createElement('div');
+      head.className = 'card__head card__head--spread widget__head';
+      const body = document.createElement('div');
+      body.className = 'card__body widget__body';
+      el.append(tools, head, body);
+      gridEl.append(el);
+
+      const api = def.mount(head, body);
+      const rec = { el, type: slot.type, size: slot.size || def.defaultSize, api };
+      applySize(rec);
+
+      tools.querySelector('.widget__size').addEventListener('click', (e) => { e.stopPropagation(); openSizeMenu(rec, e.currentTarget); });
+      tools.querySelector('.widget__replace').addEventListener('click', (e) => { e.stopPropagation(); openWidgetSheet(rec); });
+      tools.querySelector('.widget__remove').addEventListener('click', (e) => { e.stopPropagation(); removeSlot(rec); });
+      slots.push(rec);
+    });
+    if (editing) enterEditVisual();
+  }
+
+  function renderHome() {
+    slots.forEach((s) => s.api && s.api.update && s.api.update());
+  }
+
+  function removeSlot(rec) {
+    rec.el.remove();
+    if (rec.api && rec.api.destroy) rec.api.destroy();
+    slots = slots.filter((s) => s !== rec);
+    syncLayoutFromDom();
+  }
+  function addSlot(type = 'recent', size) {
+    const def = WIDGET_DEFS[type];
+    if (!def || def.comingSoon) return;
+    layout.push({ type, size: size || def.defaultSize });
+    buildGrid();
+    renderHome();
+  }
+
+  function enterEditVisual() {
+    gridEl.classList.add('is-editing');
+    slots.forEach((s) => s.el.classList.add('is-shaking'));
+    initSortable();
+  }
+  function exitEditVisual() {
+    gridEl.classList.remove('is-editing');
+    slots.forEach((s) => s.el.classList.remove('is-shaking'));
+    destroySortable();
+  }
+  function initSortable() {
+    if (sortable || !window.Sortable || !gridEl) return;
+    sortable = window.Sortable.create(gridEl, {
+      animation: 160,
+      draggable: '.widget',
+      onEnd: () => { syncLayoutFromDom(); dragMoved = true; },
+    });
+  }
+  function destroySortable() { if (sortable) { sortable.destroy(); sortable = null; } }
+
+  function enterEdit() {
+    if (editing) return;
+    editing = true;
+    if (editBtn) { editBtn.textContent = '完成'; editBtn.classList.add('is-active'); }
+    enterEditVisual();
+  }
+  function exitEdit() {
+    if (!editing) return;
+    editing = false;
+    if (editBtn) { editBtn.textContent = '编辑模块'; editBtn.classList.remove('is-active'); }
+    exitEditVisual();
+    persistLayout();
+  }
+
+  /* 尺寸快捷菜单（5 种离散尺寸） */
+  function openSizeMenu(rec, anchor) {
+    closeWidgetMenus();
+    const menu = document.createElement('div');
+    menu.className = 'wj-menu';
+    menu.dataset.role = 'size-menu';
+    menu.innerHTML = GRID_SIZES.map((sz) => {
+      const { w, h } = parseSize(sz);
+      const disabled = w > currentCols();
+      return `<button type="button" data-size="${sz}" ${disabled ? 'disabled' : ''}>${w}×${h}${disabled ? '（空间不足）' : ''}</button>`;
+    }).join('');
+    document.body.append(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.top = `${r.bottom + 6}px`;
+    menu.style.left = `${r.left}px`;
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-size]'); if (!b || b.disabled) return;
+      rec.size = b.dataset.size;
+      applySize(rec);
+      syncLayoutFromDom();
+      closeWidgetMenus();
+    });
+    setTimeout(() => document.addEventListener('click', closeWidgetMenus, { once: true }), 0);
+  }
+
+  /* 替换 / 新增 底部弹窗（列出全部组件，未实现的置灰） */
+  const sheet = document.getElementById('tm-widget-sheet');
+  const sheetMask = document.getElementById('tm-widget-sheet-mask');
+  const sheetBody = document.getElementById('tm-widget-sheet-body');
+  const sheetTitle = document.getElementById('tm-widget-sheet-title');
+  let sheetTarget = null; // 替换目标 rec；为 null 表示新增
+
+  function openWidgetSheet(rec) {
+    sheetTarget = rec || null;
+    sheetTitle.textContent = rec ? '替换组件' : '新增组件';
+    sheetBody.innerHTML = Object.entries(WIDGET_DEFS).map(([type, def]) => `
+      <button type="button" class="wj-sheet__item${def.comingSoon ? ' is-disabled' : ''}" data-type="${type}" ${def.comingSoon ? 'disabled' : ''}>
+        <span class="wj-sheet__name">${def.title}</span>
+        <span class="wj-sheet__size">${def.defaultSize}${def.comingSoon ? ' · 即将推出' : ''}</span>
+      </button>`).join('');
+    sheetBody.querySelectorAll('button[data-type]').forEach((b) => {
+      if (b.disabled) return;
+      b.addEventListener('click', () => {
+        const type = b.dataset.type;
+        if (sheetTarget) {
+          if (sheetTarget.api && sheetTarget.api.destroy) sheetTarget.api.destroy();
+          sheetTarget.type = type;
+          sheetTarget.el.dataset.type = type;
+          const head = sheetTarget.el.querySelector('.widget__head');
+          const body = sheetTarget.el.querySelector('.widget__body');
+          head.innerHTML = '';
+          body.className = 'card__body widget__body';
+          body.innerHTML = '';
+          sheetTarget.api = WIDGET_DEFS[type].mount(head, body);
+          if (editing) sheetTarget.el.classList.add('is-shaking');
+        } else {
+          addSlot(type);
+        }
+        syncLayoutFromDom();
+        closeWidgetSheet();
+      });
+    });
+    sheet.hidden = false; sheetMask.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add('is-open'));
+  }
+  function closeWidgetSheet() {
+    sheet.classList.remove('is-open');
+    sheetMask.hidden = true;
+    setTimeout(() => { sheet.hidden = true; }, 240);
+  }
+  function closeWidgetMenus() {
+    document.querySelectorAll('[data-role="size-menu"]').forEach((m) => m.remove());
+  }
+  sheetMask?.addEventListener('click', closeWidgetSheet);
+  document.getElementById('tm-widget-sheet-close')?.addEventListener('click', closeWidgetSheet);
+
+  editBtn?.addEventListener('click', () => { editing ? exitEdit() : enterEdit(); });
+
+  // 每次按下先清掉"拖拽残留"标记，保证下一次交互的判断是干净的
+  document.addEventListener('mousedown', () => { dragMoved = false; });
+
+  // 编辑态下点网格空白处关闭尺寸菜单（点工具栏按钮已 stopPropagation，不会触发）
+  gridEl.addEventListener('click', (e) => {
+    if (!e.target.closest('.widget__tools')) closeWidgetMenus();
+  });
+
+  // 编辑态点击「主页空白处」即保存并退出编辑（除完成按钮外多一种保存方式）。
+  // 网格内的空白（点在网格容器/间隙上、不在任何组件里）一律视为空白：
+  // 网格里除组件外不该有任何可交互元素，无论命中什么都直接保存退出，
+  // 这样海报墙右侧空列等任何网格空白都能结束编辑。
+  // 网格外则按排除名单判断（地图/顶栏/侧栏/浮层/交互控件不触发）。
+  // 刚拖拽完组件（onEnd 置位 dragMoved）的点击不算空白保存，避免松手即退出。
+  document.addEventListener('click', (e) => {
+    if (!editing) return;
+    if (dragMoved) { dragMoved = false; return; }
+    const t = e.target;
+    if (gridEl.contains(t) && !t.closest('.widget')
+      && !t.closest('.wj-menu') && !t.closest('.wj-sheet')) { exitEdit(); return; }
+    if (t.closest('.widget') || t.closest('.mapcard') || t.closest('.topbar')
+      || t.closest('.sidebar') || t.closest('.wj-menu') || t.closest('.wj-sheet')
+      || t.closest('#tm-edit-widgets')
+      || t.closest('button, a, input, select, textarea, label')) return;
+    exitEdit();   // 内部会 persistLayout() 落盘
+  });
+
+  // 列数变化（响应式）时重新 clamp 尺寸，保证不溢出
+  window.addEventListener('resize', () => { slots.forEach((s) => applySize(s)); });
+
+  // 首次构建网格：即使还没数据，也先摆出空态卡片；数据到达后 renderHome 填充
+  buildGrid();
 
   return {
     setView,

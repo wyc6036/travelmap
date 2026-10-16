@@ -71,6 +71,43 @@
 .pw--i { grid-column: 2 / 4; grid-row: 4 / 5; }   /* 横块 */
 .pw--j { grid-column: 4 / 5; grid-row: 4 / 5; }
 
+/* ⚠️ 随模块比例改版：保持「大小错落」的灵动感，但不让照片被压成横条。
+   · 默认（ar ≤ 1.2，含近方/竖条）：上面那套 4×4 精排（大图 + 横块 + 小方）。
+   · 宽条（1.2 < ar ≤ 3.0）：还是 4×4，但把三个 2×1 横块改成 1×2 竖块 ——
+     仍是大小错落、保留大图；竖向长块不会被压成横条。
+   · 超宽（ar > 3.0）：5 列 × 3 行，五个 1×2 竖块与五个 1×1 上下交错（之字排布），
+     既有错落节奏又避免横条。
+   三套都靠 .pw--a~.pw--j 重写 span 实现，互不重叠。 */
+.posterwall--wide {
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+}
+.posterwall--wide .pw--a { grid-column: 1 / 3; grid-row: 1 / 3; }   /* 2×2 大图（保留） */
+.posterwall--wide .pw--b { grid-column: 3 / 4; grid-row: 1 / 3; }   /* 竖块 1×2 */
+.posterwall--wide .pw--c { grid-column: 4 / 5; grid-row: 1 / 3; }   /* 竖块 1×2 */
+.posterwall--wide .pw--d { grid-column: 1 / 2; grid-row: 3 / 5; }   /* 竖块 1×2 */
+.posterwall--wide .pw--e { grid-column: 2 / 3; grid-row: 3 / 4; }
+.posterwall--wide .pw--f { grid-column: 3 / 4; grid-row: 3 / 4; }
+.posterwall--wide .pw--g { grid-column: 4 / 5; grid-row: 3 / 4; }
+.posterwall--wide .pw--h { grid-column: 2 / 3; grid-row: 4 / 5; }
+.posterwall--wide .pw--i { grid-column: 3 / 4; grid-row: 4 / 5; }
+.posterwall--wide .pw--j { grid-column: 4 / 5; grid-row: 4 / 5; }
+
+.posterwall--uw {
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.posterwall--uw .pw--a { grid-column: 1 / 2; grid-row: 1 / 3; }   /* 竖块 */
+.posterwall--uw .pw--b { grid-column: 2 / 3; grid-row: 2 / 4; }   /* 竖块 */
+.posterwall--uw .pw--c { grid-column: 3 / 4; grid-row: 1 / 3; }   /* 竖块 */
+.posterwall--uw .pw--d { grid-column: 4 / 5; grid-row: 2 / 4; }   /* 竖块 */
+.posterwall--uw .pw--e { grid-column: 5 / 6; grid-row: 1 / 3; }   /* 竖块 */
+.posterwall--uw .pw--f { grid-column: 1 / 2; grid-row: 3 / 4; }   /* 小方 */
+.posterwall--uw .pw--g { grid-column: 2 / 3; grid-row: 1 / 2; }   /* 小方 */
+.posterwall--uw .pw--h { grid-column: 3 / 4; grid-row: 3 / 4; }   /* 小方 */
+.posterwall--uw .pw--i { grid-column: 4 / 5; grid-row: 1 / 2; }   /* 小方 */
+.posterwall--uw .pw--j { grid-column: 5 / 6; grid-row: 3 / 4; }   /* 小方 */
+
 .pw {
   position: relative;
   min-width: 0;
@@ -86,6 +123,7 @@
   position: relative;
   width: 100%; height: 100%;
   transform-style: preserve-3d;
+  backface-visibility: hidden;     /* 防止翻牌时背面穿透闪烁（合成层抖动的另一来源） */
   transition: transform var(--dur-flip, .58s) var(--ease);
   will-change: transform;
 }
@@ -100,19 +138,30 @@
 }
 .pw__face + .pw__face { transform: rotateY(180deg); }
 
+/* 照片容器：只放前景媒体，按自身比例 contain 完整显示；
+   留白处直接露出 .pw__face 的 background:var(--surface-3)（卡片底色），
+   不再铺模糊蒙版。 */
+.pw__wrap {
+  position: absolute; inset: 0;
+  z-index: 1;
+}
+
 .pw__media {
+  position: relative;
   width: 100%; height: 100%;
-  object-fit: cover;
+  object-fit: contain;              /* 按自身比例完整显示，不硬裁 */
   display: block;
   opacity: 0;
   transition: opacity var(--dur-fast, .2s) var(--ease);
+  z-index: 1;
 }
-.pw__media.ok { opacity: 1; }      /* 加载完再淡入，慢网时不露底色 */
+.pw__media.ok { opacity: 1; }
 
 .pw__scrim {
   position: absolute; inset: 0;
   pointer-events: none;
   background: linear-gradient(to top, rgba(28, 20, 12, .52), rgba(28, 20, 12, 0) 56%);
+  z-index: 2;
 }
 
 .pw__meta {
@@ -124,6 +173,7 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, .45);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
+  z-index: 3;
 }
 .pw__meta b { font-weight: 600; }
 .pw__meta span { color: rgba(255, 255, 255, .78); font-size: var(--fs-xs); }
@@ -135,6 +185,7 @@
   background: rgba(24, 18, 12, .42);
   display: grid; place-items: center;
   pointer-events: none;
+  z-index: 3;
 }
 .pw__play::before {
   content: ""; width: 0; height: 0; margin-left: 2px;

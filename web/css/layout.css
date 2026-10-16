@@ -93,8 +93,7 @@
    ⚠️ 两列**故意等高**：`.grid` 默认 `align-items: start`，这里改回 stretch，
       让海报卡跟着左列一起长高，两张卡的上下边缘各自对齐（用户明确要求"模块之间保持对齐"）。
       海报墙自己再按比例吃掉这份高度，见 css/poster.css。 */
-.grid--main { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); align-items: stretch; }
-.maincol { display: grid; gap: var(--gap); min-width: 0; align-content: start; }
+/* 首页小组件磁贴网格的列数（--cols）与基准行高（--cell-h）改由 widget.css 控制。 */
 
 /* 页脚 */
 .sitefoot {
@@ -125,10 +124,7 @@
 }
 
 @media (max-width: 1200px) {
-  .grid--main { grid-template-columns: minmax(0, 1fr); }
-  /* 宽图表只剩一列、地图卡片几乎占满主区，继续用 min(vh, vw) 锁"高/宽"比例，
-     保证默认的世界视角不被压窄（比例关系见 tokens.css 的 --map-h 注释）。 */
-  :root { --map-h: clamp(300px, min(60vh, 56vw), 660px); }
+  :root { --cols: 2; --map-h: clamp(300px, min(60vh, 56vw), 660px); }
 }
 
 @media (max-width: 1040px) {
@@ -218,6 +214,7 @@
 }
 
 @media (max-width: 620px) {
+  :root { --cols: 1; }
   .topbar__right { width: 100%; }
   .searchbar { flex: 1 1 140px; }
   .btn--primary { padding: 8px 12px; }
@@ -234,5 +231,5 @@
      4 列会把每张缩略图压到 100px 以下。2 列正好铺满整行。
      ⚠️ 别用 repeat(auto-fit, minmax(126px, 240px))：max 是确定值时，
      自动重复次数按 max 算，592px 的卡只会排到 2 条 240 的轨道、右边空一截。 */
-  #tm-card-recent .mediagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .widget[data-type="recent"] .mediagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -50,6 +50,17 @@ ENV NODE_ENV=production
 ENV PORT=8080
 ENV DATA_DIR=/data
 
+# 内置 MinIO 默认连接信息：镜像单独 docker run（不走 compose）时，
+# 首配向导也能正确预填，不会出现「服务器地址、账号、密码均为必填」。
+# 与 docker-compose*.yml 里的 minio 服务约定保持一致；
+# 换自己的 MinIO / OSS 时用 -e 覆盖即可。
+ENV MINIO_ENDPOINT=minio \
+    MINIO_PORT=9000 \
+    MINIO_USE_SSL=false \
+    MINIO_ACCESS_KEY=travelmap \
+    MINIO_SECRET_KEY=changeme-minio-password \
+    MINIO_BUCKET=travelmap
+
 # 运行期只需 ffmpeg（视频转 H.264 + 抽首帧）。
 # 各镜像站可达性因网络而异：用「短超时 + 多镜像兜底」循环（含 ustc / tuna / 163 / 华为云 / 阿里云 / 腾讯云），
 # 第一个能装上 ffmpeg 的就用它（HTTP 80，免证书依赖）。

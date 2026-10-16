@@ -35,11 +35,19 @@ export function createPoster({ root, onOpen }) {
   let blocks = [];
   let paused = false;
 
-  /* ---------- 一面卡的内容 ---------- */
+  /* ---------- 一面卡的内容 ----------
+     照片用 object-fit:contain 按自身比例完整显示，留白处直接露出卡片底色
+     （.pw__face 的 background:var(--surface-3)），不再铺模糊蒙版。
+     这样无论格子是 1×1、1×2 还是 2×2，照片比例都能自然适应、不被硬裁，
+     错落排布的同时也不会被压成横条。 */
   function paintFace(face, item) {
     face.innerHTML = '';
 
+    const wrap = document.createElement('div');
+    wrap.className = 'pw__wrap';
     let media;
+    let src = '';
+
     if (item.kind === 'video' && !item.poster) {
       media = document.createElement('video');
       media.className = 'pw__media';
@@ -53,15 +61,17 @@ export function createPoster({ root, onOpen }) {
         media.classList.add('ok');
       }, { once: true });
     } else {
+      src = item.kind === 'video' ? item.poster : item.src;   // 有封面就用封面
       media = document.createElement('img');
       media.className = 'pw__media';
-      media.src = item.kind === 'video' ? item.poster : item.src;   // 有封面就用封面
+      media.src = src;
       media.alt = item.title || '';
       if (media.complete && media.naturalWidth) media.classList.add('ok');
       else media.addEventListener('load', () => media.classList.add('ok'), { once: true });
     }
-    face.append(media);
+    wrap.append(media);
 
+    face.append(wrap);
     face.insertAdjacentHTML('beforeend',
       '<div class="pw__scrim"></div>'
       + (item.kind === 'video' ? '<div class="pw__play"></div>' : '')
@@ -120,12 +130,16 @@ export function createPoster({ root, onOpen }) {
       const hidden = rec.faces[((rec.rot / 180) % 2 === 0) ? 1 : 0];
       paintFace(hidden, next);
 
-      if (immediate) rec.inner.style.transition = 'none';
-      rec.rot += 180;
-      rec.inner.style.transform = `rotateY(${rec.rot}deg)`;
       if (immediate) {
+        // 即时翻牌（首帧 / 换一批）：无过渡直接落到目标角度，同时把角度归零保持有界
+        rec.inner.style.transition = 'none';
+        rec.rot = (rec.rot + 180) % 360;
+        rec.inner.style.transform = `rotateY(${rec.rot}deg)`;
         void rec.inner.offsetWidth;        // 强制 reflow，让"无过渡"先生效
         rec.inner.style.transition = '';
+      } else {
+        rec.rot += 180;
+        rec.inner.style.transform = `rotateY(${rec.rot}deg)`;
       }
       rec.cur = next;
     });
@@ -144,18 +158,33 @@ export function createPoster({ root, onOpen }) {
     blocks.forEach((b) => clearTimeout(b.timer));
   }
 
-  /* ---------- 高度上限 ----------
-     墙跟着卡片吃满高度是有代价的：左列越高，墙越"瘦高"，4 行格子会把 4:3 的照片裁成竖条
-     （实测 1220px 时 1×1 格子到 0.54:1，照片只剩 ~40%，正是用户反馈过的"图片没完整显示"）。
-     所以按当前宽度反推高度上限，保证 宽/高 ≥ 0.95；多出来的高度在卡内上下留白。
-     纯 CSS 做不到（无法在 max-height 里引用自身宽度），只能用 ResizeObserver 写回。 */
+  /* ---------- 高度上限 + 随模块比例改版（保持交错灵动，不统一等大）----------
+     目标：模块被拉成宽长条时，不能把 4 行压扁成横条，但也不能切成统一等大那样死板。
+     所以按墙自身宽高比切三套"错落"版式（纯 CSS 无法引用自身宽高比，用 RO 写回 class）：
+       · 近方/竖条（ar ≤ 1.2）：原 4×4 精排 —— 2×2 大图 + 三个 2×1 横条 + 六个 1×1，节奏最灵动。
+       · 宽条（1.2 < ar ≤ 3.0）：4×4，但把三个 2×1 横条改成 1×2 竖条 —— 仍是大小错落、
+         保留大图，竖向长条不会被压成横条。
+       · 超宽（ar > 3.0）：5 列 × 3 行错落（五个 1×2 竖块 + 五个 1×1 交错），避免横条。
+     窄屏（≤1200px）的 aspect-ratio 定高另算，见 poster.css。 */
   const ASPECT_MIN = 0.95;
+  const AR_WIDE = 1.2;     // 宽高比超过它 → 竖向错落版式（保留大小不一）
+  const AR_UW   = 3.0;     // 宽高比超过它 → 超宽错落版式
   function clampHeight() {
     const w = root.clientWidth;
     if (!w) return;
     root.style.maxHeight = `${Math.round(w / ASPECT_MIN)}px`;
   }
-  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => clampHeight()) : null;
+  function applyLayout() {
+    const w = root.clientWidth;
+    const h = root.clientHeight;
+    if (w && h) {
+      const ar = w / h;
+      root.classList.toggle('posterwall--wide', ar > AR_WIDE && ar <= AR_UW);
+      root.classList.toggle('posterwall--uw', ar > AR_UW);
+    }
+    clampHeight();
+  }
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => applyLayout()) : null;
 
   /* ---------- 骨架 ---------- */
   function build() {
@@ -173,9 +202,23 @@ export function createPoster({ root, onOpen }) {
       inner.append(f1, f2);
       el.append(inner);
       root.append(el);
-      return { el, inner, faces: [f1, f2], rot: 0, cur: null, timer: 0 };
+
+      const rec = { el, inner, faces: [f1, f2], rot: 0, cur: null, timer: 0 };
+      // 翻牌动画结束后把累加角度归零：rotateY 角度若无限增大，三角函数浮点精度会
+      // 逐渐漂移，在合成层表现为翻牌时亚像素左右抖动。360° 与 0° 视觉完全等价，
+      // 翻完瞬移归零不可见，但能彻底避免角度失控。
+      el.addEventListener('transitionend', (e) => {
+        if (e.propertyName === 'transform' && rec.rot >= 360) {
+          rec.rot %= 360;
+          inner.style.transition = 'none';
+          inner.style.transform = `rotateY(${rec.rot}deg)`;
+          void inner.offsetWidth;
+          inner.style.transition = '';
+        }
+      });
+      return rec;
     });
-    clampHeight();
+    applyLayout();
     ro?.observe(root);
   }
 
