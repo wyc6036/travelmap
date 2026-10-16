@@ -7,8 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237C9CC3' d='M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z'/%3E%3C/svg%3E" />
 
 <!-- MapLibre GL JS v5（开源，无需 token）。mercator 平面投影 + OpenFreeMap 矢量瓦片。 -->
-<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
-<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<link href="./vendor/maplibre-gl.css" rel="stylesheet" />
+<script src="./vendor/maplibre-gl.js"></script>
 
 <!-- 样式加载顺序很重要：layout.css 里的响应式媒体查询必须排在 components.css 之后。
      媒体查询本身不提升优先级，若 layout 在 components 之前，窄屏下 `.usercard{display:none}`
@@ -63,6 +63,8 @@ if (location.protocol === 'file:') {
     <g id="i-globe"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18"/><path d="M12 2.8a15 15 0 0 1 0 18.4 15 15 0 0 1 0-18.4z"/></g>
     <g id="i-edit"><path d="M14.5 5.5 18.5 9.5M4 20l1.2-4.3 10.3-10.3a2 2 0 0 1 2.8 0l1.8 1.8a2 2 0 0 1 0 2.8L9.3 18.8 5 20z"/></g>
     <g id="i-trash"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0 1 13a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-13"/></g>
+    <!-- 重置：逆时针箭头回到起点，对应"恢复默认布局" -->
+    <g id="i-refresh"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></g>
     <!-- 路线：起点/终点两枚节点 + 蜿蜒路径，整体关于 (12,12) 点对称，
          与 globe/pin/image 一样铺满方框、视觉居中（对应"次旅行/里程"） -->
     <g id="i-route"><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="5" r="2.4"/><path d="M6.4 17.6H9.4A2.6 2.6 0 0 0 12 15V9A2.6 2.6 0 0 1 14.6 6.4H17.6"/></g>
@@ -160,6 +162,9 @@ if (location.protocol === 'file:') {
           </button>
           <button class="btn btn--ghost" id="tm-edit-widgets" title="编辑首页模块">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑模块
+          </button>
+          <button class="btn btn--ghost" id="tm-reset-layout" title="恢复默认布局" hidden>
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-refresh"/></svg>重置布局
           </button>
           <button class="btn btn--primary" id="tm-add">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg>记录新足迹
@@ -718,8 +723,8 @@ if (location.protocol === 'file:') {
   </p>
 </div>
 
-<!-- 拖拽重排（编辑态）：全局 UMD，挂载到 window.Sortable，与现有 unpkg 依赖风格一致 -->
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<!-- 拖拽重排（编辑态）：全局 UMD，挂载到 window.Sortable（自托管，见 web/vendor/） -->
+<script src="./vendor/Sortable.min.js"></script>
 <script type="module" src="./js/main.js"></script>
 <script>
 /* file:// 兜底提示：ES Module 会静默失败，这里给出人话解释 */

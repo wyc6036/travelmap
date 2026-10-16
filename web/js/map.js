@@ -138,7 +138,7 @@ export function applyChineseLabels(map) {
  */
 export function createMap(container, overrides = {}) {
   if (typeof maplibregl === 'undefined') {
-    throw new Error('MapLibre GL JS 未加载：请检查网络是否可以访问 unpkg CDN。');
+    throw new Error('MapLibre GL JS 未加载：请确认 web/vendor/maplibre-gl.js 已随前端正确部署。');
   }
 
   const view = { ...CONFIG.view, ...overrides };

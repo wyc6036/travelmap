@@ -133,6 +133,13 @@
      max 兜住超大屏，min 保证窄屏也够高。 */
   --map-h: clamp(340px, min(66vh, 52vw), 760px);
 
+  /* 首页小组件磁贴网格的基准列数 / 行高（widget.css 只消费、不再重声明）。
+     ⚠️ 响应式改列数由 layout.css 的 @media 覆盖（≤1200px→2 列，≤620px→1 列）。
+     默认值必须放在最先加载的 tokens.css，且 widget.css 不得再无条件写 --cols，
+     否则会因加载顺序盖掉 layout.css 的媒体查询，导致移动端列数失效。 */
+  --cols: 4;
+  --cell-h: 230px;
+
   /* ---------- 动效 ---------- */
   --ease: cubic-bezier(.32, .72, .28, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);

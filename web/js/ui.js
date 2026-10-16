@@ -1094,6 +1094,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
 
   const gridEl = document.getElementById('tm-widget-grid');
   const editBtn = document.getElementById('tm-edit-widgets');
+  const resetBtn = document.getElementById('tm-reset-layout');
   let layout = loadLayout() || DEFAULT_LAYOUT.map((s) => ({ ...s }));
   let editing = false;
   let slots = [];
@@ -1209,12 +1210,14 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     if (editing) return;
     editing = true;
     if (editBtn) { editBtn.textContent = '完成'; editBtn.classList.add('is-active'); }
+    if (resetBtn) resetBtn.hidden = false;   // 编辑态才暴露「重置布局」
     enterEditVisual();
   }
   function exitEdit() {
     if (!editing) return;
     editing = false;
     if (editBtn) { editBtn.textContent = '编辑模块'; editBtn.classList.remove('is-active'); }
+    if (resetBtn) resetBtn.hidden = true;
     exitEditVisual();
     persistLayout();
   }
@@ -1296,6 +1299,18 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
   document.getElementById('tm-widget-sheet-close')?.addEventListener('click', closeWidgetSheet);
 
   editBtn?.addEventListener('click', () => { editing ? exitEdit() : enterEdit(); });
+  resetBtn?.addEventListener('click', (e) => { e.stopPropagation(); resetLayout(); });
+
+  /* 重置布局：把首页模块恢复为出厂默认（DEFAULT_LAYOUT），覆盖当前自定义。
+     仅在编辑态可见；先二次确认，避免误触丢失自定义。 */
+  function resetLayout() {
+    if (!window.confirm('确定把首页模块恢复为默认布局吗？\n当前自定义（顺序 / 尺寸 / 已移除的模块）将被覆盖。')) return;
+    layout = DEFAULT_LAYOUT.map((s) => ({ ...s }));
+    buildGrid();      // 重建网格；editing 态会由 enterEditVisual 重新套上抖动 + 拖拽
+    renderHome();
+    persistLayout();  // 内部 syncLayoutFromDom → 写回 localStorage
+    toast('已恢复默认布局');
+  }
 
   // 每次按下先清掉"拖拽残留"标记，保证下一次交互的判断是干净的
   document.addEventListener('mousedown', () => { dragMoved = false; });

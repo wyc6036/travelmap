@@ -354,7 +354,7 @@ function bindControls() {
  * ========================================================= */
 async function boot() {
   if (typeof maplibregl === 'undefined') {
-    showError('MapLibre GL JS 加载失败：请检查网络是否能访问 unpkg CDN，然后刷新页面。');
+    showError('MapLibre GL JS 加载失败：请确认 web/vendor/maplibre-gl.js 已随前端正确部署，然后刷新页面。');
     return;
   }
 
