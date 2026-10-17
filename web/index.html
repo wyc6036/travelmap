@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="./css/modal.css" />
 <link rel="stylesheet" href="./css/app.css" />
 <link rel="stylesheet" href="./css/widget.css" />
+<link rel="stylesheet" href="./css/wishlist.css" />
 
 <script>
 /* 以 file:// 直接打开时，浏览器会拦截 fetch 与 ES Module，控制台会刷一片报错。
@@ -290,6 +291,11 @@ if (location.protocol === 'file:') {
       <div class="modal__mapblur" id="tm-modal-mapblur"></div>
       <div class="modal__mapedge"></div>
       <div class="modal__mapbadge" id="tm-modal-badge"></div>
+      <div class="modal__noloc" id="tm-modal-noloc" hidden>
+        <div class="modal__noloc-ico">📍</div>
+        <p class="modal__noloc-title">这个心愿还没有定位</p>
+        <p class="modal__noloc-sub">在「编辑心愿」里补充国家 / 城市，它就会落到愿望地图上。</p>
+      </div>
     </div>
 
     <div class="modal__body" id="tm-modal-body">
@@ -409,7 +415,6 @@ if (location.protocol === 'file:') {
           <select id="tm-add-type" class="form-input">
             <option value="居住">居住</option>
             <option value="旅行" selected>旅行</option>
-            <option value="目的地">目的地</option>
           </select>
         </div>
       </div>

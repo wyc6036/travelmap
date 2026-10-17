@@ -95,6 +95,29 @@ CREATE TABLE IF NOT EXISTS geocities (
   population  INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS geocities_latlng ON geocities(lat, lng);
+/* 心愿数据（2026-10-17 起由后端持久化，原仅存 localStorage）。
+   - wish_annotations：对「已有足迹地点」或「自建心愿地点」的注解（wish 标记 / 优先级 / 备注 / 目标季）。
+     place_id 既可指向 places 表里的足迹地点，也可指向 wish_places 表里的自建心愿地点。
+   - wish_places：用户在心愿面板「新建」的纯心愿目的地（不在 places 表里，故不会出现在足迹地图/列表中，仅心愿清单可见）。 */
+CREATE TABLE IF NOT EXISTS wish_annotations (
+  place_id   TEXT PRIMARY KEY,
+  wish       INTEGER DEFAULT 0,
+  priority   INTEGER DEFAULT 0,
+  note       TEXT DEFAULT '',
+  target     TEXT DEFAULT '',
+  added_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS wish_places (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  country    TEXT DEFAULT '',
+  lng        REAL DEFAULT 0,
+  lat        REAL DEFAULT 0,
+  priority   INTEGER DEFAULT 0,
+  note       TEXT DEFAULT '',
+  target     TEXT DEFAULT '',
+  added_at   TEXT DEFAULT (datetime('now'))
+);
 `);
 
 /* 老库补列必须赶在下面的预备语句之前：stmt.insertMedia / stmt.setMediaMeta
@@ -162,6 +185,25 @@ const stmt = {
   unassignedNoGps: db.prepare("SELECT id,kind,url,thumb_url,caption,taken_at FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='') AND gps_lat=0 AND gps_lng=0"),
   allPlacesLite: db.prepare('SELECT id,name,lng,lat FROM places'),
   assignMedia: db.prepare("UPDATE media SET place_id=? WHERE id=?"),
+  /* 心愿：注解（按 place_id 索引）与自建心愿地点 */
+  getWishAnnotations: db.prepare('SELECT * FROM wish_annotations'),
+  getWishPlaces: db.prepare('SELECT * FROM wish_places'),
+  upsertWishAnnotation: db.prepare(`
+    INSERT INTO wish_annotations (place_id, wish, priority, note, target, added_at)
+    VALUES (@place_id, @wish, @priority, @note, @target, @added_at)
+    ON CONFLICT(place_id) DO UPDATE SET
+      wish=excluded.wish, priority=excluded.priority, note=excluded.note,
+      target=excluded.target, added_at=excluded.added_at
+  `),
+  delWishAnnotation: db.prepare('DELETE FROM wish_annotations WHERE place_id=?'),
+  upsertWishPlace: db.prepare(`
+    INSERT INTO wish_places (id, name, country, lng, lat, priority, note, target, added_at)
+    VALUES (@id, @name, @country, @lng, @lat, @priority, @note, @target, @added_at)
+    ON CONFLICT(id) DO UPDATE SET
+      name=excluded.name, country=excluded.country, lng=excluded.lng, lat=excluded.lat,
+      priority=excluded.priority, note=excluded.note, target=excluded.target
+  `),
+  delWishPlace: db.prepare('DELETE FROM wish_places WHERE id=?'),
 };
 
 function saveTypes(types) {
@@ -363,6 +405,96 @@ function setPlaceCoverUrl(id, url) {
   return true;
 }
 
+/* ----------------------------- 心愿数据（后端持久化） ----------------------------- */
+
+/**
+ * 读取全部心愿数据：注解（按 place_id）+ 自建心愿地点。
+ * addedAt 统一规范成数字（前端排序用），避免 SQLite 文本与 localStorage 数字混用。
+ * @returns {{annotations: object, places: Array}}
+ */
+function getWishes() {
+  const annotations = {};
+  for (const a of stmt.getWishAnnotations.all()) {
+    annotations[a.place_id] = {
+      wish: !!a.wish,
+      priority: Number(a.priority) || 0,
+      note: a.note || '',
+      target: a.target || '',
+      addedAt: a.added_at != null ? Number(a.added_at) || a.added_at : null,
+    };
+  }
+  const places = stmt.getWishPlaces.all().map((p) => ({
+    id: p.id,
+    name: p.name,
+    country: p.country || '',
+    countryZh: p.country || '',
+    lng: p.lng != null ? Number(p.lng) : null,
+    lat: p.lat != null ? Number(p.lat) : null,
+    priority: Number(p.priority) || 0,
+    note: p.note || '',
+    target: p.target || '',
+    addedAt: p.added_at != null ? Number(p.added_at) || p.added_at : null,
+    type: '目的地',
+    isWishNew: true,
+    media: [],
+    mediaCount: { image: 0, video: 0, text: 0, total: 0 },
+    cover: '',
+  }));
+  return { annotations, places };
+}
+
+/**
+ * 写入 / 更新某地点的心愿注解（覆盖式：传什么改什么由调用方决定）。
+ * @param {object} a { place_id, wish, priority, note, target, addedAt }
+ */
+function upsertWishAnnotation(a) {
+  if (!a || !a.place_id) return false;
+  stmt.upsertWishAnnotation.run({
+    place_id: String(a.place_id),
+    wish: a.wish ? 1 : 0,
+    priority: Number(a.priority || 0),
+    note: String(a.note || ''),
+    target: String(a.target || ''),
+    added_at: a.addedAt != null ? String(a.addedAt) : new Date().toISOString(),
+  });
+  return true;
+}
+
+/** 删除某地点的心愿注解（移出清单时 wish=false 仅覆盖，这里则彻底清行）。 */
+function deleteWishAnnotation(placeId) {
+  stmt.delWishAnnotation.run(String(placeId));
+  return true;
+}
+
+/**
+ * 写入 / 更新一个自建心愿地点（upsert，按 id）。
+ * id 由前端生成（形如 wish-...），便于乐观更新与服务端一致；缺省则服务端生成。
+ * @param {object} p { id?, name, country, lng, lat, priority, note, target, addedAt }
+ * @returns {string} 实际写入的 id
+ */
+function saveWishPlace(p) {
+  const id = p && p.id ? String(p.id) : uid('wish');
+  stmt.upsertWishPlace.run({
+    id,
+    name: String((p && p.name) || '未命名'),
+    country: String((p && p.country) || ''),
+    lng: p && p.lng != null ? Number(p.lng) : null,
+    lat: p && p.lat != null ? Number(p.lat) : null,
+    priority: Number((p && p.priority) || 0),
+    note: String((p && p.note) || ''),
+    target: String((p && p.target) || ''),
+    added_at: p && p.addedAt != null ? String(p.addedAt) : new Date().toISOString(),
+  });
+  return id;
+}
+
+/** 删除自建心愿地点（同时清掉它的注解行）。 */
+function deleteWishPlace(id) {
+  stmt.delWishPlace.run(String(id));
+  stmt.delWishAnnotation.run(String(id));
+  return true;
+}
+
 /* ----------------------------- 批量 GPS 归档（地理编码） ----------------------------- */
 
 /** 把媒体指派到某地点（批量归档的核心写操作）。 */
@@ -541,10 +673,12 @@ function getExportBundle() {
   const trips = db.prepare('SELECT * FROM trips').all();
   const tripPlaces = db.prepare('SELECT trip_id, place_id, sort_order FROM trip_places').all();
   const media = db.prepare('SELECT * FROM media').all();
+  const wishAnnotations = db.prepare('SELECT * FROM wish_annotations').all();
+  const wishPlaces = db.prepare('SELECT * FROM wish_places').all();
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    data: { types, userProfile: profile, places, trips, trip_places: tripPlaces, media },
+    data: { types, userProfile: profile, places, trips, trip_places: tripPlaces, media, wish_annotations: wishAnnotations, wish_places: wishPlaces },
   };
 }
 
@@ -644,10 +778,14 @@ function applyImportBundle(bundle) {
     db.prepare('DELETE FROM media').run();
     db.prepare('DELETE FROM places').run();
     db.prepare('DELETE FROM trips').run();
+    db.prepare('DELETE FROM wish_annotations').run();
+    db.prepare('DELETE FROM wish_places').run();
     insertRowsSafe('places', places);
     insertRowsSafe('trips', trips);
     insertRowsSafe('trip_places', tripPlaces);
     insertRowsSafe('media', media);
+    insertRowsSafe('wish_annotations', d.wish_annotations || []);
+    insertRowsSafe('wish_places', d.wish_places || []);
     if (d.types && typeof d.types === 'object') stmt.setTypes.run(JSON.stringify(d.types));
     if (prof && typeof prof === 'object') stmt.setMeta.run('userProfile', JSON.stringify(prof));
   });
@@ -754,4 +892,5 @@ module.exports = {
   getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed,
   assignMediaToPlace, getUnassignedMediaWithGps, getUnassignedNoGps,
   getAllPlacesLite, getGeocitiesCount, importGeocities, ensureGeocitiesLoaded,
+  getWishes, upsertWishAnnotation, deleteWishAnnotation, saveWishPlace, deleteWishPlace,
 };

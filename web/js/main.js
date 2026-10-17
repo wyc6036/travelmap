@@ -29,6 +29,7 @@ import { initSetup } from './setup.js';
 import { createAddPlace } from './upload.js';
 import { createAddTrip } from './trip-edit.js';
 import { createArchive } from './archive.js';
+import { initWishes } from './wishstore.js';
 
 /* =========================================================
  * 启动状态
@@ -98,7 +99,7 @@ function selectPlace(place, { openModal = false, fly = true } = {}) {
   app.markers?.setActive(place.id);
   app.ui?.setSelected(place);
 
-  if (fly) {
+  if (fly && Number.isFinite(place.lng) && Number.isFinite(place.lat)) {
     app.map.flyTo({
       center: [place.lng, place.lat],
       zoom: Math.max(app.map.getZoom(), 4.5),
@@ -500,8 +501,10 @@ async function boot() {
     /* 详情弹窗「编辑」→ 地点交给新增/编辑弹窗，行程交给编辑行程弹窗（按 places 数组区分）。
        addPlace / addTrip 都在下方创建，点击时才取用，无 TDZ 问题。 */
     onEdit: (item) => {
-      if (item && Array.isArray(item.places)) addTrip?.edit(item);
-      else addPlace?.edit(item);
+      if (item && Array.isArray(item.places)) { addTrip?.edit(item); return; }
+      /* 心愿地点（本机自建）走专属「编辑心愿地点」弹窗，而不是 travel/residence 弹窗 */
+      if (item && item.isWishNew) { app.ui?.openWishEdit(item); return; }
+      addPlace?.edit(item);
     },
     /* 详情弹窗「删除」→ 删完主动刷新一次地图打点（不必等 15 秒轮询） */
     onDeleted: () => refreshData(),
@@ -532,6 +535,9 @@ async function boot() {
   /* ---- 用户资料：拉取并渲染侧栏，绑定编辑弹窗 ---- */
   initUserProfile();
   await loadProfile();
+
+  /* ---- 心愿数据：从服务端拉取（首次会把本机 localStorage 数据迁移上云） ---- */
+  await initWishes();
 
   /* ---- 数据 ---- */
   let first;

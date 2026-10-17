@@ -100,6 +100,7 @@ export function createDetailModal({
   const tabsEl = document.getElementById('tm-modal-tabs');
   const contentEl = document.getElementById('tm-modal-content');
   const badgeEl = document.getElementById('tm-modal-badge');
+  const noLocEl = document.getElementById('tm-modal-noloc');
   const closeBtn = document.getElementById('tm-modal-close');
   const editBtn = document.getElementById('tm-modal-edit');
   const deleteBtn = document.getElementById('tm-modal-delete');
@@ -115,6 +116,7 @@ export function createDetailModal({
   const lbNext = document.getElementById('tm-lb-next');
 
   let detailMap = null;
+  let zoomCtl = null;           // 全屏分栏下挂到详情地图的「放大/缩小」控件，退出时移除
   let detailMarkers = [];
   let routeAnim = null;
   /** 当前展示内容的"视图对象"：{ kind, ref, name, sub, badge, color, media, mediaCount, places? }
@@ -167,6 +169,8 @@ export function createDetailModal({
     // 双指/双击缩放（doubleClickZoom）与拖拽平移仍然保留。
     detailMap.scrollZoom?.disable?.();
     mapwrapEl.addEventListener('wheel', (e) => {
+      // 全屏分栏下滚轮交给地图缩放（scrollZoom 已开启），不再滚动右侧媒体
+      if (fsActive) return;
       bodyEl.scrollTop += e.deltaY;
       e.preventDefault();
     }, { passive: false });
@@ -202,6 +206,9 @@ export function createDetailModal({
     setBaseStyle(detailMap, key);
   }
 
+  /** 未定位心愿：小地图中央的提示层（关闭 / 有坐标时隐藏） */
+  function showNoLocHint(on) { if (noLocEl) noLocEl.hidden = !on; }
+
   /** 清空小地图上的图钉（行程模式要的是"只剩路线"，不是"路线 + 一堆邻居"） */
   function clearDetailMarkers() {
     detailMarkers.forEach((m) => { try { m.remove(); } catch (_) { /* 忽略 */ } });
@@ -211,6 +218,8 @@ export function createDetailModal({
   /** 小地图上的图钉：选中地点 + 附近足迹 */
   function renderDetailMarkers(place) {
     clearDetailMarkers();
+    // 主地点未定位（经纬度为空）：没有坐标可落点，直接退出，避免 setLngLat([null,null]) 报错
+    if (!Number.isFinite(place.lng) || !Number.isFinite(place.lat)) return;
 
     const radius = CONFIG.detailMap.nearbyRadiusKm;
     const nearby = (getPlaces() || []).filter((p) => (
@@ -768,16 +777,17 @@ export function createDetailModal({
   /** 地点视图 */
   function placeView(place) {
     const country = place.countryZh ? `${place.countryZh} · ` : '';
+    const located = Number.isFinite(place.lng) && Number.isFinite(place.lat);
+    const loc = located ? `${place.lng.toFixed(2)}, ${place.lat.toFixed(2)}` : '未定位';
+    const subKind = place.isWishNew ? '心愿地点' : '到访记录';
     return {
       kind: 'place',
       ref: place,
       name: place.name,
       sub: place.date
         ? `${country}${formatDateRange(place.date, place.endDate)}`
-        : `${country}到访记录`,
-      badge: place.countryZh
-        ? `${place.countryZh} · ${place.lng.toFixed(2)}, ${place.lat.toFixed(2)}`
-        : `${place.lng.toFixed(2)}, ${place.lat.toFixed(2)}`,
+        : `${country}${subKind}`,
+      badge: place.countryZh ? `${place.countryZh} · ${loc}` : loc,
       color: colorOf(place),
       media: place.media,
       mediaCount: place.mediaCount,
@@ -904,11 +914,20 @@ export function createDetailModal({
            先把地点图钉清掉，否则「京都 → 东京」这种短程路线会被周围一串邻居图钉淹没；
            routeAnim 自己也会清上一次的图层与站点标记。
            把站点所在国家的包围盒一起交给取景，让"走一遍"带上地理上下文。 */
+        showNoLocHint(false);
         clearDetailMarkers();
         routeAnim.play(view.places, { contextBounds: contextBoundsFor(view.places) });
       } else {
         routeAnim.stop();                 // 从行程切到地点：动画与折线一并收掉
-        renderDetailMarkers(view.ref);
+        if (Number.isFinite(view.ref.lng) && Number.isFinite(view.ref.lat)) {
+          showNoLocHint(false);
+          renderDetailMarkers(view.ref);
+        } else {
+          // 未定位心愿：小地图不画图钉、退回世界视角，并提示去编辑里补坐标
+          clearDetailMarkers();
+          detailMap.jumpTo({ center: [20, 20], zoom: 1.2 });
+          showNoLocHint(true);
+        }
       }
       detailMap.resize();
     });
@@ -931,6 +950,7 @@ export function createDetailModal({
   function close() {
     if (modal.hidden) return;
     closeLightbox();
+    showNoLocHint(false);                 // 收起「未定位」提示层
     stopFilter = null;                    // 下次打开不残留上一次的站点筛选
     routeAnim?.stop();                    // 先把动画停掉，别让它在退场动画期间继续跑
     modal.classList.add('is-closing');
@@ -977,6 +997,15 @@ export function createDetailModal({
     panel.insertBefore(left, bodyEl);
     left.append(mapwrapEl, headEl);
     padEl.style.display = 'none';
+    // 全屏下开启地图缩放：滚轮缩放 + 放大/缩小按钮（top-left，避开右上角弹窗按钮与右下角署名）
+    if (detailMap) {
+      detailMap.scrollZoom?.enable?.();
+      detailMap.keyboard?.enable?.();
+      if (!zoomCtl) {
+        zoomCtl = new maplibregl.NavigationControl({ showZoom: true, showCompass: false, showReset: false });
+        detailMap.addControl(zoomCtl, 'top-left');
+      }
+    }
     setFsIcon(true);
     if (fsBtn) { fsBtn.setAttribute('aria-pressed', 'true'); fsBtn.setAttribute('aria-label', '退出全屏视图'); }
     bodyEl.scrollTop = 0;
@@ -988,6 +1017,12 @@ export function createDetailModal({
     if (!fsActive) return;
     fsActive = false;
     modal.classList.remove('modal--fullscreen');
+    // 还原地图交互：关掉滚轮缩放与放大/缩小按钮，回到"滚轮滚动右侧媒体"的常规行为
+    if (detailMap) {
+      detailMap.scrollZoom?.disable?.();
+      detailMap.keyboard?.disable?.();
+      if (zoomCtl) { detailMap.removeControl(zoomCtl); zoomCtl = null; }
+    }
     // 先还原 .modal__head（紧跟占位块，恢复原有的 pad → head → tabs → content 顺序）
     padEl.after(headEl);
     // 再把地图容器移回 body 之前、删掉临时左栏

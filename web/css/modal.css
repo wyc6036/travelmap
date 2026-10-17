@@ -151,6 +151,20 @@
   transition: opacity var(--dur) var(--ease);
 }
 
+/* 「未定位」心愿：小地图中央的提示层 */
+.modal__noloc {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 0 24px; text-align: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, .55));
+  backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.modal__noloc[hidden] { display: none; }
+.modal__noloc-ico { font-size: 30px; line-height: 1; margin-bottom: 2px; opacity: .8; }
+.modal__noloc-title { margin: 0; font-weight: 700; color: var(--ink-1); font-size: var(--fs-md); }
+.modal__noloc-sub { margin: 0; color: var(--ink-3); font-size: var(--fs-sm); line-height: 1.5; }
+
 /* ================= 下半：多媒体内容 =================
    内容区"整个覆盖"在面板上（inset:0），地图以更高的 z-index 压在它顶部。
    首个子元素 .modal__pad 是一块"固定高度"的占位，高度恒为 --mw-max，

@@ -23,6 +23,7 @@
 
 import { MEDIA_LABELS, VIEW_META, COLORS, regionLabel } from './config.js';
 import { api } from './api.js';
+import { CITIES } from './cities.js';
 import {
   escapeHtml, formatDateDot, formatDateRange, countUp, toast,
 } from './utils.js';
@@ -33,6 +34,11 @@ import { renderStatsView as renderStatsPanel } from './stats.js';
 import { pinSvg } from './markers.js';
 /* 地图页右列的「旅途海报」墙（多张同时陈列 + 各自随机翻牌） */
 import { createPoster } from './poster.js';
+/* 心愿注解的唯一数据源（localStorage + 跨模块变更通知），与 upload.js 共用，
+   避免重复维护、缓存不一致。ui.js 内只保留派生口径等纯函数。 */
+import { getAnn, setAnn, getNewPlaces, addWishPlace, updateWishPlace, deleteWishPlace, initWishes } from './wishstore.js';
+/* 国家 / 地区中心点经纬度库（离线优先，Nominatim 在线兜底）—— 新建心愿地点填国家时补全坐标 */
+import { COUNTRY_CENTROIDS } from './country-centroids.js';
 
 const icon = (name, cls = 'ico') => `<svg class="${cls}" viewBox="0 0 24 24"><use href="#i-${name}"/></svg>`;
 
@@ -371,23 +377,58 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     return out;
   }
 
-  /* ---------- 愿望清单口径 ----------
-     三处共用（地图页预览条带 / 愿望清单视图 / 计数），抽出来避免两处口径漂移：
-     未来日期（计划） + 未标注日期 + 类型为「目的地」的，去重后按日期升序。
-     ⚠️ 未标注日期的排在最后（key 取 Infinity）：它们没有"先后"，混在中间会让顺序看着随机。 */
+  /* ---------- 愿望清单：注解存储 + 派生口径 ----------
+     心愿是「想去的地点」的增强视图。为避免改动后端/数据结构，心愿专属字段
+     （wish 显式标记 / priority 优先级 / note 备注 / target 目标季 / addedAt）存浏览器
+     localStorage，按 place.id 索引，渲染时合并回地点对象。
+     ⚠️ 派生口径保持向后兼容：未显式设置时，未来日期 + 未标注日期 + 类型为「目的地」
+        仍算心愿；显式 wish=true/false 可覆盖（例如把一条「目的地」移出清单）。
+     ⚠️ 存储已抽到共享模块 wishstore.js（ui.js / upload.js 共用），这里仅留别名与派生口径。 */
+  const annOf = getAnn;   // 别名，沿用下方大量调用点
+
+  /** 是否已加入心愿（合并显式标记与派生口径） */
+  function isWished(p) {
+    const w = annOf(p.id).wish;
+    if (w === true) return true;
+    if (w === false) return false;
+    return !!(p.hasFutureDate || !p.dateTs || p.type === '目的地');
+  }
+  /** 心愿是否已"实现"（已落地为过去日期的足迹） */
+  function wishDone(p) { return !!(p.dateTs && p.dateTs <= Date.now()); }
+  /** 心愿统计：活跃数 / 已实现数 / 总数 / 完成百分比 */
+  function wishStats(list) {
+    const done = list.filter(wishDone).length;
+    const total = list.length;
+    return { done, total, active: total - done, pct: total ? Math.round((done / total) * 100) : 0 };
+  }
+
   function wishlistPlaces() {
-    const stats = computeStats();
-    const seen = new Set();
-    return [...stats.future, ...stats.undated, ...state.places.filter((p) => p.type === '目的地')]
-      .filter((p) => !seen.has(p.id) && seen.add(p.id))
-      .sort((a, b) => (a.dateTs || Infinity) - (b.dateTs || Infinity));
+    const base = state.places.filter(isWished);
+    const extra = getNewPlaces().filter(isWished);   // 用户新建的心愿地点
+    const list = base.concat(extra);
+    return list.sort((a, b) => {
+      const da = wishDone(a) ? 1 : 0, db = wishDone(b) ? 1 : 0;
+      if (da !== db) return da - db;                       // 已实现的沉底
+      const pa = annOf(a.id).priority || 0, pb = annOf(b.id).priority || 0;
+      if (pb !== pa) return pb - pa;                       // 优先级高在前
+      const va = a.dateTs || Infinity, vb = b.dateTs || Infinity;
+      if (va !== vb) return va - vb;                       // 再按日期升序
+      return String(a.name).localeCompare(String(b.name), 'zh');
+    });
+  }
+
+  /** 被「取消」的心愿（显式 wish:false），放进可回收站，误点星星也能找回。 */
+  function canceledPlaces() {
+    const np = getNewPlaces().filter((p) => annOf(p.id).wish === false);
+    const sp = state.places.filter((p) => annOf(p.id).wish === false);
+    return np.concat(sp);
   }
 
   function paintWishlist(stripEl, totalEl) {
     const wish = wishlistPlaces();
     (stripEl || (stripEl = document.createElement('div'))).innerHTML = '';
     wish.slice(0, 6).forEach((p) => stripEl.append(placeCard(p, { onOpen: onOpenDetail })));
-    if (!wish.length) stripEl.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
+    if (!wish.length) stripEl.innerHTML = emptyState('愿望清单是空的', '点顶部「愿望清单」里的「+ 添加心愿」，规划一个想去的地方');
     if (totalEl) totalEl.textContent = `(${wish.length})`;
   }
 
@@ -684,18 +725,759 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     root.append(wrap);
   }
 
-  function renderWishlistView() {
-    const root = dom.viewWishlist;
-    const list = wishlistPlaces();
-    root.innerHTML = '';
-    if (!list.length) {
-      root.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期即可');
+  /* ---------- 愿望清单视图（重设计） ----------
+     顶部进度环 + 筛选/排序工具栏 + 按国家分组的心愿列表 + 右侧栏
+     「愿望地图」（按经纬度投影聚合，不用 MapLibre，避免动地图模块）+「年内计划」。
+     心愿增删改只写浏览器 localStorage 注解，不碰后端与数据结构。 */
+  let wlFilter = 'all';     // 'all' | 国家名 | '__undated'
+  let wlSort = 'priority';  // priority | target | added | country
+  const byWishId = (id) => state.places.find((p) => p.id === id) || getNewPlaces().find((p) => p.id === id);
+
+  /* 封面：有真实图用图，否则按类型色给渐变占位（与 App 类型色同源） */
+  const WL_COVER = {
+    目的地: 'linear-gradient(135deg,#9b86b8,#7E6C9C)',
+    旅行: 'linear-gradient(135deg,#E0A183,#C86E4A)',
+    居住: 'linear-gradient(135deg,#AEC5D9,#4E7398)',
+    __: 'linear-gradient(135deg,#9A9287,#6B655C)',
+  };
+  function wlCover(p) {
+    if (p.cover) {
+      return `<div class="wl-card__cover" style="background:#eee">
+        <img src="${escapeHtml(p.cover)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"
+             onerror="this.style.display='none'" />
+        <span class="lbl">${escapeHtml(p.name)}</span></div>`;
+    }
+    return `<div class="wl-card__cover" style="background:${WL_COVER[p.type] || WL_COVER.__}">
+      <div class="scene"></div><span class="lbl">${escapeHtml(p.name)}</span></div>`;
+  }
+
+  /* 心愿卡 */
+  function wishCard(p) {
+    const a = annOf(p.id);
+    const done = wishDone(p);
+    const canceled = a.wish === false;     // 显式「取消」：仅在「已取消」筛选里出现，可一键恢复
+    const pri = a.priority || 0;
+    const el = document.createElement('div');
+    el.className = 'wl-card' + (done ? ' is-done' : '') + (canceled ? ' is-canceled' : '');
+    el.dataset.id = p.id;
+    const stars = [1, 2, 3].map((i) => `<span class="${i <= pri ? '' : 'off'}" data-pri="${i}">★</span>`).join('');
+    const note = a.note ? `<div class="wl-note"><b>为什么想去：</b>${escapeHtml(a.note)}</div>` : '';
+    const target = a.target
+      ? `<span class="wl-tag">🎯 ${escapeHtml(a.target)}</span>`
+      : (p.hasFutureDate ? `<span class="wl-tag">🗓 ${escapeHtml(formatDateDot(p.date))}</span>` : '<span class="wl-tag">🗓 未定</span>');
+    el.innerHTML = `
+      ${wlCover(p)}
+      ${canceled
+        ? `<div class="wl-card__acts">
+             <button class="wl-card__act wl-card__restore" data-act="restore" type="button" title="恢复心愿" aria-label="恢复">↺</button>
+             ${p.isWishNew ? '<button class="wl-card__act wl-card__del" data-act="wishdel" type="button" title="删除心愿地点" aria-label="删除">🗑</button>' : ''}
+           </div>`
+        : `<div class="wl-card__star" data-act="wish" title="想去 / 取消">★</div>`}
+      ${done ? '<div class="wl-card__done">✓ 已实现</div>' : ''}
+      <div class="wl-card__meta">
+        <p class="wl-card__name"><span class="wl-dot" style="background:${state.colorOf(p) || '#7E6C9C'}"></span>${escapeHtml(p.name)}</p>
+        <p class="wl-card__sub">📍 ${escapeHtml(p.countryZh || p.type)}${done ? ' · 已旅行' : ''}</p>
+        <div class="wl-stars" data-act="pri">${stars}</div>
+        ${note}
+        <div class="wl-tags">${canceled ? '<span class="wl-tag wl-tag--muted">↺ 已取消</span>' : ''}${target}</div>
+        <button class="wl-card__edit" data-act="edit" type="button">✎ 编辑心愿</button>
+      </div>
+      <div class="wl-editor" data-role="editor" data-pri="${pri}">
+        <div>
+          <label>优先级</label>
+          <div class="wl-editor__stars" data-role="estars">${[1, 2, 3].map((i) => `<span class="${i <= pri ? '' : 'off'}" data-epri="${i}">★</span>`).join('')}</div>
+        </div>
+        <div>
+          <label>为什么想去 / 想做的事</label>
+          <textarea data-role="enote" placeholder="写一句心愿，比如：想赶樱花季拍竹林">${escapeHtml(a.note || '')}</textarea>
+        </div>
+        <div>
+          <label>目标时间（如 2026 春 / 未定）</label>
+          <input type="text" data-role="etarget" value="${escapeHtml(a.target || '')}" placeholder="2026 春" />
+        </div>
+        <div class="wl-editor__acts">
+          <button class="save" data-act="save" type="button">保存</button>
+          <button class="ghost" data-act="cancel" type="button">取消</button>
+          <button class="ghost danger" data-act="remove" type="button">移出清单</button>
+        </div>
+      </div>`;
+    return el;
+  }
+
+  function sortWish(view, mode) {
+    const arr = view.slice();
+    const base = (a, b) => { const da = wishDone(a) ? 1 : 0, db = wishDone(b) ? 1 : 0; return da - db; };
+    if (mode === 'priority') arr.sort((a, b) => base(a, b) || ((annOf(b.id).priority || 0) - (annOf(a.id).priority || 0)) || ((a.dateTs || Infinity) - (b.dateTs || Infinity)));
+    else if (mode === 'target') arr.sort((a, b) => base(a, b) || ((a.dateTs || Infinity) - (b.dateTs || Infinity)) || String(a.name).localeCompare(String(b.name), 'zh'));
+    else if (mode === 'added') arr.sort((a, b) => base(a, b) || ((annOf(b.id).addedAt || 0) - (annOf(a.id).addedAt || 0)));
+    else if (mode === 'country') arr.sort((a, b) => base(a, b) || String(a.countryZh || '未定').localeCompare(String(b.countryZh || '未定'), 'zh') || String(a.name).localeCompare(String(b.name), 'zh'));
+    return arr;
+  }
+
+  function buildWishGroups(view) {
+    const frag = document.createElement('div');
+    const groups = new Map();
+    view.forEach((p) => {
+      const k = p.countryZh || '未定目的地';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(p);
+    });
+    [...groups.entries()].forEach(([k, arr]) => {
+      const g = document.createElement('div');
+      g.className = 'wl-grp';
+      const flag = k === '未定目的地' ? '🌍' : '🏳';
+      g.innerHTML = `<div class="wl-grp__h"><span class="flag">${flag}</span><span class="name">${escapeHtml(k)}</span><span class="cnt">${arr.length} 项</span><span class="line"></span></div>`;
+      const grid = document.createElement('div');
+      grid.className = 'wl-grid';
+      arr.forEach((p) => grid.append(wishCard(p)));
+      g.append(grid);
+      frag.append(g);
+    });
+    return frag;
+  }
+
+  /* 聚合地图：等距圆柱投影，按真实经纬度落点，按大洲配色（不依赖 MapLibre） */
+  const CONTINENT = {
+    中国: '亚洲', 日本: '亚洲', 韩国: '亚洲', 泰国: '亚洲', 新加坡: '亚洲', 马来西亚: '亚洲', 越南: '亚洲', 印尼: '亚洲', 印度: '亚洲', 土耳其: '亚洲',
+    法国: '欧洲', 英国: '欧洲', 德国: '欧洲', 意大利: '欧洲', 西班牙: '欧洲', 葡萄牙: '欧洲', 荷兰: '欧洲', 瑞士: '欧洲', 瑞典: '欧洲', 挪威: '欧洲', 丹麦: '欧洲', 希腊: '欧洲', 奥地利: '欧洲', 比利时: '欧洲', 芬兰: '欧洲', 爱尔兰: '欧洲', 冰岛: '欧洲', 俄罗斯: '欧洲',
+    美国: '美洲', 加拿大: '美洲', 巴西: '美洲', 墨西哥: '美洲', 阿根廷: '美洲',
+    澳大利亚: '大洋洲', 新西兰: '大洋洲',
+    埃及: '非洲', 南非: '非洲', 摩洛哥: '非洲', 肯尼亚: '非洲', 坦桑尼亚: '非洲',
+  };
+  const REGION_COLOR = { 亚洲: '#E0A183', 欧洲: '#AEC5D9', 美洲: '#93A7BC', 大洋洲: '#E3C98F', 非洲: '#B9C6A6', 其他: '#D9AFA4' };
+  const continentOf = (c) => (c && CONTINENT[c]) || '其他';
+  function buildWishMap(all) {
+    const box = document.createElement('div');
+    box.className = 'wl-minimap';
+    for (let i = 1; i < 6; i++) { const v = (i * 100) / 6; const gl = document.createElement('div'); gl.className = 'grid-line'; gl.style.left = v + '%'; gl.style.top = '0'; gl.style.width = '1px'; gl.style.height = '100%'; box.append(gl); }
+    for (let i = 1; i < 4; i++) { const v = (i * 100) / 4; const gl = document.createElement('div'); gl.className = 'grid-line'; gl.style.top = v + '%'; gl.style.left = '0'; gl.style.height = '1px'; gl.style.width = '100%'; box.append(gl); }
+    const counts = {};
+    all.forEach((p) => {
+      if (!Number.isFinite(p.lng) || !Number.isFinite(p.lat)) return;
+      const x = ((p.lng + 180) / 360) * 100;
+      const y = ((90 - Math.max(-56, Math.min(78, p.lat))) / 180) * 100;
+      const reg = continentOf(p.countryZh);
+      counts[reg] = (counts[reg] || 0) + 1;
+      const d = document.createElement('div');
+      d.className = 'dot'; d.style.left = x + '%'; d.style.top = y + '%'; d.style.background = REGION_COLOR[reg];
+      d.title = `${p.name}（${reg}）`;
+      box.append(d);
+    });
+    const noCoord = all.filter((p) => !Number.isFinite(p.lng) || !Number.isFinite(p.lat)).length;
+    const legend = document.createElement('div');
+    legend.className = 'wl-minimap__legend';
+    const legendItems = Object.entries(counts).map(([r, n]) => `<span><i style="background:${REGION_COLOR[r]}"></i>${r} ${n}</span>`);
+    if (noCoord) legendItems.push(`<span class="wl-minimap__legend-warn"><i></i>未定位 ${noCoord}</span>`);
+    legend.innerHTML = legendItems.join('');
+    box.append(legend);
+    return box;
+  }
+
+  function buildSoonList(all) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wl-soon';
+    const items = all.filter((p) => { const a = annOf(p.id); return (a.target && a.target !== '未定') || p.hasFutureDate; })
+      .sort((a, b) => (a.dateTs || Infinity) - (b.dateTs || Infinity));
+    if (!items.length) { wrap.innerHTML = '<div class="wl-soon__empty">还没有设定目标时间的心愿</div>'; return wrap; }
+    items.slice(0, 8).forEach((p) => {
+      const a = annOf(p.id);
+      const when = (a.target && a.target !== '未定') ? a.target : (p.date ? formatDateDot(p.date) : '未定');
+      const it = document.createElement('div');
+      it.className = 'wl-soon__item';
+      it.innerHTML = `<span class="wl-soon__dot" style="background:${state.colorOf(p)}"></span><span class="wl-soon__name">${escapeHtml(p.name)}</span><span class="wl-soon__when">${escapeHtml(when)}</span>`;
+      wrap.append(it);
+    });
+    return wrap;
+  }
+
+  /* ---------------- 国家 / 地区自动补全（带中心点经纬度） ----------------
+     复用「记录新足迹」城市补全的同套思路：离线库优先 + Nominatim 在线兜底，
+     输入即弹匹配项（含中心点经纬度），选中把经纬度写进心愿，使其能在愿望地图落点。 */
+  let countryAC = null;          // 国家补全下拉（挂到 ncountry 父节点）
+  let wishCountryGeo = null;     // 选中的国家中心点 { lng, lat, cc }
+  let wishCityGeo = null;        // 选中的城市精确坐标 { lng, lat, cc }（优先级高于国家中心点）
+  /* 当前激活的「心愿表单」容器：默认回退到愿望清单视图里的添加面板；
+     打开「编辑心愿地点」弹窗时临时切到弹窗表单，使国家/城市补全与坐标写入落到正确输入框。 */
+  let wishFormRoot = null;
+  const wf = (sel) => (wishFormRoot || dom.viewWishlist).querySelector(sel);
+  function wishDebounce(fn, ms) {
+    let t = 0;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  }
+  function ensureCountryAC() {
+    const input = wf('[data-role="ncountry"]');
+    if (!input) return null;
+    if (countryAC && countryAC.isConnected) return countryAC;
+    countryAC = document.createElement('div');
+    countryAC.className = 'tm-city-ac';          // 复用记录新足迹城市补全的下拉样式
+    countryAC.hidden = true;
+    const parent = input.parentElement;
+    if (parent) { parent.style.position = 'relative'; parent.appendChild(countryAC); }
+    return countryAC;
+  }
+  function localCountryMatches(q) {
+    const s = q.trim().toLowerCase();
+    if (!s) return [];
+    return COUNTRY_CENTROIDS
+      .filter((c) => c.name.toLowerCase().includes(s) || (c.en || '').toLowerCase().includes(s) || (c.cc || '').toLowerCase() === s)
+      .slice(0, 8);
+  }
+  async function onlineCountryMatches(q) {
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6'
+        + '&accept-language=zh-CN&featuretype=country&q=' + encodeURIComponent(q);
+      const ctrl = ('AbortController' in window) ? new AbortController() : null;
+      const r = await fetch(url, { signal: ctrl ? ctrl.signal : undefined });
+      if (!r.ok) return [];
+      const arr = await r.json();
+      return (arr || []).map((it) => ({
+        name: (it.address && it.address.country) || it.name || (it.display_name || '').split(',')[0] || '',
+        cc: ((it.address && it.address.country_code) || '').toUpperCase(),
+        lat: parseFloat(it.lat),
+        lng: parseFloat(it.lon),
+      })).filter((x) => x.name && Number.isFinite(x.lat) && Number.isFinite(x.lng));
+    } catch (_) { return []; }
+  }
+  function renderCountryAC(items) {
+    const box = ensureCountryAC();
+    if (!box) return;
+    box.innerHTML = '';
+    if (!items.length) { box.hidden = true; return; }
+    items.forEach((c) => {
+      const li = document.createElement('button');
+      li.type = 'button';
+      li.className = 'tm-city-ac__item';
+      const sub = [c.cc].filter(Boolean).join(' · ');
+      li.innerHTML = `<span class="tm-city-ac__name">${escapeHtml(c.name)}</span>`
+        + (sub ? `<span class="tm-city-ac__sub">${escapeHtml(sub)}</span>` : '')
+        + `<span class="tm-city-ac__coord">${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}</span>`;
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); pickCountry(c); });
+      box.append(li);
+    });
+    box.hidden = false;
+  }
+  function pickCountry(c) {
+    const input = wf('[data-role="ncountry"]');
+    if (input) input.value = c.name;
+    wishCountryGeo = { lng: c.lng, lat: c.lat, cc: c.cc || null };
+    if (countryAC) countryAC.hidden = true;
+    toast(`已填入「${c.name}」中心点坐标`, 1800);
+  }
+  function hideCountryAC() { if (countryAC) countryAC.hidden = true; }
+  const onCountryInput = wishDebounce(() => {
+    const input = wf('[data-role="ncountry"]');
+    const q = (input?.value || '').trim();
+    wishCountryGeo = null;                     // 用户改了输入，之前选中的国家坐标作废
+    if (!q) { hideCountryAC(); return; }
+    const base = localCountryMatches(q);
+    renderCountryAC(base);
+    if (base.length < 4) {
+      onlineCountryMatches(q)
+        .then((online) => {
+          if ((wf('[data-role="ncountry"]')?.value || '').trim() !== q) return;
+          const seen = new Set(base.map((i) => i.name + '|' + i.lat.toFixed(2) + '|' + i.lng.toFixed(2)));
+          const merged = base.slice();
+          for (const o of online) {
+            const k = o.name + '|' + o.lat.toFixed(2) + '|' + o.lng.toFixed(2);
+            if (!seen.has(k)) { merged.push(o); seen.add(k); }
+          }
+          renderCountryAC(merged.slice(0, 8));
+        })
+        .catch(() => {});
+    }
+  }, 320);
+
+  /* ---------------- 城市自动补全（精确到城市经纬度） ---------------- */
+  /* 复用「记录新足迹」城市补全思路：离线 CITIES 优先 + Nominatim 在线兜底。
+     用户想精确到城市时填「城市」字段，选中写入 wishCityGeo，优先级高于国家中心点。 */
+  let cityAC = null;             // 城市补全下拉（挂到 ncity 父节点）
+  function ensureCityAC() {
+    const input = wf('[data-role="ncity"]');
+    if (!input) return null;
+    if (cityAC && cityAC.isConnected) return cityAC;
+    cityAC = document.createElement('div');
+    cityAC.className = 'tm-city-ac';          // 复用城市补全下拉样式
+    cityAC.hidden = true;
+    const parent = input.parentElement;
+    if (parent) { parent.style.position = 'relative'; parent.appendChild(cityAC); }
+    return cityAC;
+  }
+  function localCityMatches(q) {
+    const s = q.trim().toLowerCase();
+    if (!s) return [];
+    return CITIES
+      .filter((c) => c.name.toLowerCase().includes(s) || (c.country || '').toLowerCase().includes(s))
+      .slice(0, 8);
+  }
+  async function onlineCityMatches(q) {
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5'
+        + '&accept-language=zh-CN&q=' + encodeURIComponent(q);
+      const ctrl = ('AbortController' in window) ? new AbortController() : null;
+      const r = await fetch(url, { signal: ctrl ? ctrl.signal : undefined });
+      if (!r.ok) return [];
+      const arr = await r.json();
+      return (arr || []).map((it) => ({
+        name: it.name || (it.display_name || '').split(',')[0] || '',
+        country: (it.address && it.address.country) || '',
+        cc: ((it.address && it.address.country_code) || '').toUpperCase(),
+        lat: parseFloat(it.lat),
+        lng: parseFloat(it.lon),
+      })).filter((x) => x.name && Number.isFinite(x.lat) && Number.isFinite(x.lng));
+    } catch (_) { return []; }
+  }
+  function renderCityAC(items) {
+    const box = ensureCityAC();
+    if (!box) return;
+    box.innerHTML = '';
+    if (!items.length) { box.hidden = true; return; }
+    items.forEach((c) => {
+      const li = document.createElement('button');
+      li.type = 'button';
+      li.className = 'tm-city-ac__item';
+      const sub = [c.country, c.cc].filter(Boolean).join(' · ');
+      li.innerHTML = `<span class="tm-city-ac__name">${escapeHtml(c.name)}</span>`
+        + (sub ? `<span class="tm-city-ac__sub">${escapeHtml(sub)}</span>` : '')
+        + `<span class="tm-city-ac__coord">${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}</span>`;
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); pickCity(c); });
+      box.append(li);
+    });
+    box.hidden = false;
+  }
+  function pickCity(c) {
+    const input = wf('[data-role="ncity"]');
+    if (input) input.value = c.name;
+    // 城市更精确：直接覆盖国家中心点；若国家字段为空，用城市的国名顺手补全
+    wishCityGeo = { lng: c.lng, lat: c.lat, cc: c.cc || null };
+    const countryInput = wf('[data-role="ncountry"]');
+    if (countryInput && !countryInput.value.trim() && c.country) countryInput.value = c.country;
+    if (cityAC) cityAC.hidden = true;
+    toast(`已填入「${c.name}」坐标`, 1800);
+  }
+  function hideCityAC() { if (cityAC) cityAC.hidden = true; }
+  const onCityInput = wishDebounce(() => {
+    const input = wf('[data-role="ncity"]');
+    const q = (input?.value || '').trim();
+    wishCityGeo = null;                        // 用户改了输入，之前选中的城市坐标作废
+    if (!q) { hideCityAC(); return; }
+    const base = localCityMatches(q);
+    renderCityAC(base);
+    if (base.length < 4) {
+      onlineCityMatches(q)
+        .then((online) => {
+          if ((wf('[data-role="ncity"]')?.value || '').trim() !== q) return;
+          const seen = new Set(base.map((i) => i.name + '|' + i.lat.toFixed(2) + '|' + i.lng.toFixed(2)));
+          const merged = base.slice();
+          for (const o of online) {
+            const k = o.name + '|' + o.lat.toFixed(2) + '|' + o.lng.toFixed(2);
+            if (!seen.has(k)) { merged.push(o); seen.add(k); }
+          }
+          renderCityAC(merged.slice(0, 8));
+        })
+        .catch(() => {});
+    }
+  }, 320);
+
+  function buildAddPanel() {
+    wishCountryGeo = null; wishCityGeo = null; // 面板重建，清空上次选中的坐标
+    const panel = document.createElement('div');
+    panel.className = 'wl-add'; panel.dataset.role = 'addpanel';
+    panel.innerHTML = `
+      <div class="wl-add__h"><h3>添加心愿</h3><button class="x" data-act="addclose" type="button" aria-label="关闭">×</button></div>
+      <div class="wl-add__tabs">
+        <button class="wl-add__tab is-on" data-act="addtab" data-tab="new" type="button">新建心愿地点</button>
+        <button class="wl-add__tab" data-act="addtab" data-tab="existing" type="button">从已有地点</button>
+      </div>
+      <div class="wl-add__new" data-role="addnew">
+        <label>名称 *</label>
+        <input type="text" data-role="nname" placeholder="例如：冰岛环岛" />
+        <div class="wl-add__row">
+          <label>国家 / 地区</label>
+          <input type="text" data-role="ncountry" placeholder="例如：冰岛" />
+        </div>
+        <div class="wl-add__row">
+          <label>城市（精确到城市经纬度，可选）</label>
+          <input type="text" data-role="ncity" placeholder="例如：雷克雅未克" />
+        </div>
+        <label>优先级</label>
+        <div class="wl-editor__stars" data-role="cstars" data-pri="0"><span class="off" data-cpri="1">★</span><span class="off" data-cpri="2">★</span><span class="off" data-cpri="3">★</span></div>
+        <label>为什么想去 / 想做的事</label>
+        <textarea data-role="nnote" placeholder="写一句心愿，比如：想赶樱花季拍竹林"></textarea>
+        <label>目标时间（如 2026 春 / 未定）</label>
+        <input type="text" data-role="ntarget" placeholder="2026 春" />
+        <button class="wl-add__create" data-act="createwish" type="button">创建心愿</button>
+        <div class="wl-add__err" data-role="nerr"></div>
+      </div>
+      <div class="wl-add__existing" data-role="addexisting" hidden>
+        <input type="search" data-role="addsearch" placeholder="搜索地点名称…" />
+        <div class="wl-add__list" data-role="addlist"></div>
+      </div>`;
+    return panel;
+  }
+
+  /* ---------------- 编辑心愿地点弹窗（替代 travel/residence 弹窗） ----------------
+     未定位 / 已定位的心愿地点都走这个专属弹窗：可改名称、国家（带中心点经纬度）、城市、
+     优先级、备注、目标时间，并能据此把"未定位"心愿补上坐标。复用上面国家/城市补全的
+     wf() 作用域，所以打开弹窗时把 wishFormRoot 指向弹窗表单即可。 */
+  function setVal(m, role, v) { const el = m.querySelector(`[data-role="${role}"]`); if (el) el.value = (v == null ? '' : v); }
+
+  function getWishEditModal() {
+    let m = document.getElementById('tm-wish-edit');
+    if (m) return m;
+    m = document.createElement('div');
+    m.className = 'modal-edit wl-edit'; m.id = 'tm-wish-edit'; m.hidden = true;
+    m.innerHTML = `
+      <div class="modal-edit__mask" data-close="1"></div>
+      <div class="modal-edit__panel" role="dialog" aria-modal="true" aria-label="编辑心愿地点">
+        <header class="modal-edit__head">
+          <h3 id="tm-wish-edit-title">编辑心愿地点</h3>
+          <button class="modal-edit__close" data-close="1" type="button" aria-label="关闭">×</button>
+        </header>
+        <form class="modal-edit__body" data-role="wishform">
+          <label>名称 *</label>
+          <input type="text" data-role="nname" placeholder="例如：冰岛环岛" />
+          <div class="wl-add__row">
+            <label>国家 / 地区</label>
+            <input type="text" data-role="ncountry" placeholder="例如：冰岛" />
+          </div>
+          <div class="wl-add__row">
+            <label>城市（精确到城市经纬度，可选）</label>
+            <input type="text" data-role="ncity" placeholder="例如：雷克雅未克" />
+          </div>
+          <label>优先级</label>
+          <div class="wl-editor__stars" data-role="cstars" data-pri="0"><span class="off" data-cpri="1">★</span><span class="off" data-cpri="2">★</span><span class="off" data-cpri="3">★</span></div>
+          <label>为什么想去 / 想做的事</label>
+          <textarea data-role="nnote" placeholder="写一句心愿，比如：想赶樱花季拍竹林"></textarea>
+          <label>目标时间（如 2026 春 / 未定）</label>
+          <input type="text" data-role="ntarget" placeholder="2026 春" />
+          <div class="wl-add__err" data-role="nerr"></div>
+        </form>
+        <div class="modal-edit__foot">
+          <button class="ghost" data-act="wishcancel" type="button">取消</button>
+          <button class="save" data-act="wishsave" type="button">保存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    // 关闭：点遮罩 / 关闭键
+    m.addEventListener('click', (e) => {
+      if (e.target.closest('[data-close="1"]')) { closeWishEdit(); return; }
+      const csta = e.target.closest('[data-cpri]');
+      if (csta) {                                  // 优先级星标
+        const box = e.target.closest('[data-role="cstars"]');
+        const v = +csta.dataset.cpri;
+        box.querySelectorAll('[data-cpri]').forEach((s) => s.classList.toggle('off', +s.dataset.cpri > v));
+        box.dataset.pri = String(v);
+        return;
+      }
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'wishsave') saveWishEdit();
+      else if (act === 'wishcancel') closeWishEdit();
+    });
+    // 输入：国家 / 城市补全（wf 已指向弹窗表单）
+    m.addEventListener('input', (e) => {
+      if (e.target.matches('[data-role="ncountry"]')) onCountryInput();
+      else if (e.target.matches('[data-role="ncity"]')) onCityInput();
+    });
+    return m;
+  }
+
+  function openWishEdit(place) {
+    if (!place) return;
+    const a = annOf(place.id);
+    const m = getWishEditModal();
+    const body = m.querySelector('[data-role="wishform"]');
+    wishFormRoot = body;                            // 让 wf() 指向弹窗表单
+    setVal(m, 'nname', place.name);
+    setVal(m, 'ncountry', place.countryZh || place.country || '');
+    setVal(m, 'ncity', place.city || '');
+    setVal(m, 'nnote', a.note || '');
+    setVal(m, 'ntarget', a.target || '');
+    const stars = body.querySelector('[data-role="cstars"]');
+    const pri = place.priority || a.priority || 0;
+    stars.dataset.pri = String(pri);
+    stars.querySelectorAll('[data-cpri]').forEach((s) => s.classList.toggle('off', +s.dataset.cpri > pri));
+    // 已有坐标则预填国家中心点（保存时若不改国家即原样保留；城市字段另算更高优先级）
+    wishCountryGeo = (Number.isFinite(place.lng) && Number.isFinite(place.lat))
+      ? { lng: place.lng, lat: place.lat, cc: place.countryCode || place.cc || null }
+      : null;
+    wishCityGeo = null;
+    m.dataset.id = place.id;
+    m.hidden = false;
+    body.querySelector('[data-role="nname"]')?.focus();
+  }
+
+  function closeWishEdit() {
+    const m = document.getElementById('tm-wish-edit');
+    if (m) {
+      m.hidden = true;
+      m.removeAttribute('data-id');
+      const err = m.querySelector('[data-role="nerr"]'); if (err) err.textContent = '';
+    }
+    wishFormRoot = null;
+    wishCountryGeo = null; wishCityGeo = null;
+  }
+
+  function saveWishEdit() {
+    const m = document.getElementById('tm-wish-edit');
+    const id = m?.dataset.id; if (!id) return;
+    const body = m.querySelector('[data-role="wishform"]');
+    const name = body.querySelector('[data-role="nname"]').value.trim();
+    const err = body.querySelector('[data-role="nerr"]');
+    if (!name) { if (err) err.textContent = '请填写名称'; return; }
+    const country = body.querySelector('[data-role="ncountry"]').value.trim();
+    const pri = +(body.querySelector('[data-role="cstars"]').dataset.pri || 0);
+    const note = body.querySelector('[data-role="nnote"]').value.trim();
+    const target = body.querySelector('[data-role="ntarget"]').value.trim();
+    const geo = wishCityGeo || wishCountryGeo;       // 城市精确坐标优先
+    updateWishPlace(id, {
+      name, country, priority: pri, note, target,
+      lng: geo?.lng ?? null, lat: geo?.lat ?? null,
+    });
+    closeWishEdit();
+    renderWishlistView();
+    toast('已保存', 1500);
+  }
+
+  function fillAddList(q = '') {
+    const panel = dom.viewWishlist.querySelector('[data-role="addpanel"]');
+    if (!panel) return;
+    const list = panel.querySelector('[data-role="addlist"]');
+    const ql = q.trim().toLowerCase();
+    const cand = state.places.filter((p) => !isWished(p) && (!ql || (p.name || '').toLowerCase().includes(ql) || (p.countryZh || '').toLowerCase().includes(ql)));
+    if (!cand.length) { list.innerHTML = '<div class="wl-add__empty">没有可添加的地点</div>'; return; }
+    list.innerHTML = '';
+    cand.slice(0, 60).forEach((p) => {
+      const it = document.createElement('div');
+      it.className = 'wl-add__item'; it.dataset.act = 'addpick'; it.dataset.id = p.id;
+      it.innerHTML = `<span class="wl-soon__dot" style="background:${state.colorOf(p)}"></span><span class="nm">${escapeHtml(p.name)}</span><span class="sub">${escapeHtml(p.countryZh || p.type)}</span>`;
+      list.append(it);
+    });
+  }
+
+  function buildWishAside(all) {
+    const aside = document.createElement('div');
+    aside.className = 'wl-aside';
+    const mapCard = document.createElement('div');
+    mapCard.className = 'wl-aside__card';
+    mapCard.innerHTML = '<h3>愿望地图</h3><p class="ah-sub">心愿按地区聚合，一眼看清集中在哪</p>';
+    mapCard.append(buildWishMap(all));
+    aside.append(mapCard);
+    const soonCard = document.createElement('div');
+    soonCard.className = 'wl-aside__card';
+    soonCard.innerHTML = '<h3>年内计划</h3><p class="ah-sub">带目标时间的心愿</p>';
+    soonCard.append(buildSoonList(all));
+    aside.append(soonCard);
+    return aside;
+  }
+
+  function onWishClick(e) {
+    const esta = e.target.closest('[data-epri]');
+    if (esta) {
+      const ed = e.target.closest('.wl-editor'); const v = +esta.dataset.epri;
+      ed.querySelectorAll('[data-epri]').forEach((s) => s.classList.toggle('off', +s.dataset.epri > v));
+      ed.dataset.pri = String(v);
       return;
     }
-    const grid = document.createElement('div');
-    grid.className = 'mediagrid';
-    list.forEach((p) => grid.append(placeCard(p, { onOpen: onOpenDetail })));
-    root.append(grid);
+    const csta = e.target.closest('[data-cpri]');
+    if (csta) {
+      const box = e.target.closest('[data-role="cstars"]'); const v = +csta.dataset.cpri;
+      box.querySelectorAll('[data-cpri]').forEach((s) => s.classList.toggle('off', +s.dataset.cpri > v));
+      box.dataset.pri = String(v);
+      return;
+    }
+    const t = e.target.closest('[data-act]');
+    if (!t) {
+      const card = e.target.closest('.wl-card');
+      if (card && !e.target.closest('.wl-editor')) { const p = byWishId(card.dataset.id); if (p) onOpenDetail?.(p); }
+      return;
+    }
+    const act = t.dataset.act;
+    const card = t.closest('.wl-card');
+    if (act === 'wish') {
+      const p = byWishId(card.dataset.id); if (!p) return;
+      const now = isWished(p);
+      setAnn(p.id, { wish: !now, addedAt: !now ? Date.now() : undefined });
+      renderWishlistView();
+      // 取消不再"凭空消失"：明确告知去了哪里，并给出找回入口
+      toast(now ? '已移入「↺ 已取消」，可在清单顶部找回' : '已加回愿望清单', 2200);
+    } else if (act === 'restore') {
+      const p = byWishId(card.dataset.id); if (!p) return;
+      setAnn(p.id, { wish: true, addedAt: Date.now() });
+      toast('已加回愿望清单', 1600);
+      renderWishlistView();
+    } else if (act === 'wishdel') {
+      if (confirm('确定删除该心愿地点吗？此操作不可恢复。')) {
+        deleteWishPlace(card.dataset.id);
+        toast('已删除', 1500);
+        renderWishlistView();
+      }
+    } else if (act === 'clearcanceled') {
+      if (confirm('确定清除所有已取消的心愿地点吗？此操作不可恢复。')) {
+        canceledPlaces().forEach((p) => { if (p.isWishNew) deleteWishPlace(p.id); });
+        toast('已清除', 1500);
+        renderWishlistView();
+      }
+    } else if (act === 'edit') {
+      card.classList.toggle('is-editing');
+    } else if (act === 'cancel') {
+      renderWishlistView();
+    } else if (act === 'remove') {
+      setAnn(card.dataset.id, { wish: false });
+      renderWishlistView();
+    } else if (act === 'save') {
+      const id = card.dataset.id;
+      const ed = card.querySelector('.wl-editor');
+      const pri = +(ed.dataset.pri || annOf(id).priority || 0);
+      const note = ed.querySelector('[data-role="enote"]').value.trim();
+      const target = ed.querySelector('[data-role="etarget"]').value.trim();
+      setAnn(id, { priority: pri, note, target, wish: true });
+      renderWishlistView();
+    } else if (act === 'pri') {
+      setAnn(card.dataset.id, { priority: +t.dataset.pri });
+      renderWishlistView();
+    } else if (act === 'filter') {
+      wlFilter = t.dataset.val; renderWishlistView();
+    } else if (act === 'addopen') {
+      const ap = dom.viewWishlist.querySelector('[data-role="addpanel"]');
+      if (ap) {
+        ap.classList.add('is-open');
+        const newTab = ap.querySelector('[data-act="addtab"][data-tab="new"]');
+        if (newTab) newTab.click();                       // 回到「新建」页并同步显隐
+        ap.querySelector('[data-role="nname"]').focus();
+      }
+    } else if (act === 'addclose') {
+      t.closest('.wl-add').classList.remove('is-open');
+    } else if (act === 'addtab') {
+      const ap = t.closest('.wl-add');
+      const newOn = t.dataset.tab === 'new';
+      ap.querySelectorAll('.wl-add__tab').forEach((b) => b.classList.toggle('is-on', b.dataset.tab === t.dataset.tab));
+      ap.querySelector('[data-role="addnew"]').hidden = !newOn;
+      ap.querySelector('[data-role="addexisting"]').hidden = newOn;
+      if (!newOn) fillAddList();
+    } else if (act === 'createwish') {
+      const ap = t.closest('.wl-add');
+      const name = ap.querySelector('[data-role="nname"]').value.trim();
+      const err = ap.querySelector('[data-role="nerr"]');
+      if (!name) { err.textContent = '请填写名称'; return; }
+      const country = ap.querySelector('[data-role="ncountry"]').value.trim();
+      const pri = +(ap.querySelector('[data-role="cstars"]').dataset.pri || 0);
+      const note = ap.querySelector('[data-role="nnote"]').value.trim();
+      const target = ap.querySelector('[data-role="ntarget"]').value.trim();
+      const geo = wishCityGeo || wishCountryGeo;   // 城市精确坐标优先，否则用国家中心点
+      addWishPlace({ name, country, priority: pri, note, target, lng: geo?.lng ?? null, lat: geo?.lat ?? null });
+      renderWishlistView();
+    } else if (act === 'addpick') {
+      setAnn(t.dataset.id, { wish: true, addedAt: Date.now() });
+      renderWishlistView();
+    }
+  }
+
+  let wlBound = false;
+  function bindWishEvents() {
+    if (wlBound) return; wlBound = true;
+    dom.viewWishlist.addEventListener('click', onWishClick);
+    dom.viewWishlist.addEventListener('input', (e) => {
+      if (e.target.matches('[data-role="addsearch"]')) fillAddList(e.target.value);
+      else if (e.target.matches('[data-role="ncountry"]')) onCountryInput();
+      else if (e.target.matches('[data-role="ncity"]')) onCityInput();
+    });
+    dom.viewWishlist.addEventListener('focusin', (e) => {
+      if (e.target.matches('[data-role="ncountry"]')) onCountryInput();
+      else if (e.target.matches('[data-role="ncity"]')) onCityInput();
+    });
+    dom.viewWishlist.addEventListener('focusout', (e) => {
+      if (e.target.matches('[data-role="ncountry"]')) setTimeout(hideCountryAC, 150);
+      else if (e.target.matches('[data-role="ncity"]')) setTimeout(hideCityAC, 150);
+    });
+    dom.viewWishlist.addEventListener('change', (e) => { if (e.target.matches('[data-act="sort"]')) { wlSort = e.target.value; renderWishlistView(); } });
+  }
+
+  function renderWishlistView() {
+    bindWishEvents();
+    initWishes();   // 幂等：首拉服务端（或迁移本机数据），之后为 no-op
+    const root = dom.viewWishlist;
+    const all = wishlistPlaces();
+    root.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'wl';
+
+    const stats = wishStats(all);
+    const head = document.createElement('div');
+    head.className = 'wl__head';
+    head.innerHTML = `
+      <div class="wl__title">
+        <h2>我的愿望清单</h2>
+        <p>把想去的地方管理起来 —— 备注、优先级、进度、地图聚合一次到位。</p>
+      </div>
+      <div class="wl-progress">
+        <div class="wl-ring" style="--p:${stats.pct}"><b>${stats.pct}%</b></div>
+        <div class="wl-progress__txt">
+          已实现 <span class="big">${stats.done}</span> / ${stats.total} 项<br>
+          还差 <b>${stats.active}</b> 个心愿待出发
+        </div>
+      </div>`;
+    wrap.append(head);
+
+    const countries = [...new Set(all.map((p) => p.countryZh || '未定目的地').filter(Boolean))];
+    const noCoordCount = all.filter((p) => !Number.isFinite(p.lng) || !Number.isFinite(p.lat)).length;
+    const canceledCount = canceledPlaces().length;
+    const toolbar = document.createElement('div');
+    toolbar.className = 'wl-toolbar';
+    const chips = ['全部', ...countries].map((c) => {
+      const val = c === '全部' ? 'all' : (c === '未定目的地' ? '__undated' : c);
+      const on = wlFilter === val ? ' is-on' : '';
+      const label = c === '未定目的地' ? '🌍 未定目的地' : (c === '全部' ? '全部' : c);
+      return `<span class="wl-chip${on}" data-act="filter" data-val="${escapeHtml(val)}">${label}</span>`;
+    }).join('');
+    // 「📍 未定位 N」：筛出没有经纬度的心愿（新建时没选国家/城市）。仅在有未定位心愿时出现。
+    const noCoordChip = noCoordCount
+      ? `<span class="wl-chip wl-chip--warn${wlFilter === '__nocoord' ? ' is-on' : ''}" data-act="filter" data-val="__nocoord">📍 未定位 ${noCoordCount}</span>`
+      : '';
+    const canceledChip = canceledCount
+      ? `<span class="wl-chip wl-chip--muted${wlFilter === '__canceled' ? ' is-on' : ''}" data-act="filter" data-val="__canceled">↺ 已取消 ${canceledCount}</span>`
+      : '';
+    toolbar.innerHTML = `
+      <div class="wl-chips">${chips}${noCoordChip}${canceledChip}</div>
+      ${wlFilter === '__canceled' ? `<button class="wl-clear-canceled" data-act="clearcanceled" type="button">🗑 一键清除（${canceledCount}）</button>` : ''}
+      <div class="spacer"></div>
+      <button class="wl-add-btn" data-act="addopen" type="button">＋ 添加心愿</button>
+      <select class="wl-sort" data-act="sort" title="排序">
+        <option value="priority"${wlSort === 'priority' ? ' selected' : ''}>排序：优先级</option>
+        <option value="target"${wlSort === 'target' ? ' selected' : ''}>排序：目标日期</option>
+        <option value="added"${wlSort === 'added' ? ' selected' : ''}>排序：添加时间</option>
+        <option value="country"${wlSort === 'country' ? ' selected' : ''}>排序：国家</option>
+      </select>`;
+    wrap.append(toolbar);
+    wrap.append(buildAddPanel());
+
+    let view = all;
+    if (wlFilter === '__undated') view = view.filter((p) => !p.countryZh);
+    else if (wlFilter === '__nocoord') view = view.filter((p) => !Number.isFinite(p.lng) || !Number.isFinite(p.lat));
+    else if (wlFilter === '__canceled') view = canceledPlaces();
+    else if (wlFilter !== 'all') view = view.filter((p) => (p.countryZh || '未定目的地') === wlFilter);
+    view = sortWish(view, wlSort);
+
+    const cols = document.createElement('div');
+    cols.className = 'wl-cols';
+    if (view.length) {
+      cols.append(buildWishGroups(view));
+    } else {
+      const empty = document.createElement('div');
+      empty.innerHTML = (wlFilter === '__canceled')
+        ? emptyState('没有已取消的心愿', '你已处理完所有取消的心愿')
+        : emptyState('这里还没有心愿', '点上方「＋ 添加心愿」，把想去的地方加进来');
+      cols.append(empty);
+    }
+    cols.append(buildWishAside(all));
+    wrap.append(cols);
+
+    const foot = document.createElement('div');
+    foot.className = 'wl-foot';
+    foot.textContent = '心愿数据已同步保存到服务器（与你的足迹一起备份）；本机浏览器另存一份离线副本，断网时也能看。';
+    wrap.append(foot);
+
+    root.append(wrap);
   }
 
   /**
@@ -1031,7 +1813,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
             const wish = wishlistPlaces();
             body.innerHTML = '';
             wish.slice(0, 6).forEach((p) => body.append(placeCard(p, { onOpen: onOpenDetail })));
-            if (!wish.length) body.innerHTML = emptyState('愿望清单是空的', '新增足迹时把类型选「目的地」，或填一个未来日期');
+            if (!wish.length) body.innerHTML = emptyState('愿望清单是空的', '点上方「+ 添加心愿」，新建或挑一个想去的地方');
             head.querySelector('[data-role="total"]').textContent = `(${wish.length})`;
           },
         };
@@ -1350,6 +2132,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     setStatus,
     renderAll,
     renderSettingsView,
+    /* 打开「编辑心愿地点」弹窗（替代 travel/residence 弹窗，用于心愿地点二次编辑 / 补坐标） */
+    openWishEdit,
     /* 卡片没了，但"当前选中哪个地点"仍要记着：弹窗、图钉高亮、搜索定位都读它 */
     setSelected(place) { if (state) state.selected = place; },
     getStats: computeStats,

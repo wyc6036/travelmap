@@ -98,6 +98,14 @@ export const api = {
   /* 类型调色板 */
   saveTypes: (types) => req('/types', json(types)),
 
+  /* 心愿数据（后端持久化；前端仍以 localStorage 作离线镜像）
+     读取整份心愿数据集（注解 + 自建地点）；写入走细粒度接口。 */
+  getWishes: () => req('/wishes'),
+  putWishAnnotation: (placeId, ann) => req(`/wishes/annotations/${encodeURIComponent(placeId)}`, { method: 'PUT', body: JSON.stringify(ann || {}) }),
+  postWishPlace: (place) => req('/wishes/places', json(place)),
+  putWishPlace: (id, place) => req(`/wishes/places/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(place || {}) }),
+  deleteWishPlace: (id) => req(`/wishes/places/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   /* 媒体上传：传入 FormData（可含 file，或纯文字 text_body） */
   uploadMedia: (formData) => req('/upload', { method: 'POST', body: formData }),
 

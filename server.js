@@ -25,7 +25,8 @@ const { spawn } = require('child_process');
 const { DATA_DIR, uid, getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed, saveTypes, getMeta, setMeta,
   createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
   updateMedia, setPlaceCoverUrl, setMediaMeta, migrateMediaMeta,
-  markMediaReady, markMediaError, ensureGeocitiesLoaded } = require('./src/db');
+  markMediaReady, markMediaError, ensureGeocitiesLoaded,
+  getWishes, upsertWishAnnotation, deleteWishAnnotation, saveWishPlace, deleteWishPlace } = require('./src/db');
 const { AUTH_ENABLED, requireAuth, login, makeToken } = require('./src/auth');
 const storage = require('./src/storage');
 const geocode = require('./src/geocode');
@@ -386,6 +387,37 @@ app.put('/api/media/:id', write, (req, res) => {
 app.post('/api/types', write, (req, res) => {
   saveTypes(req.body || {});
   res.json({ ok: true });
+});
+
+/* ----------------------------- 心愿数据（后端持久化） -----------------------------
+   心愿是地点的增强视图：注解（wish/priority/note/target）按 place_id 落到 wish_annotations，
+   用户在心愿面板新建的纯目的地落到 wish_places（不进 places 表，故不污染足迹地图/列表）。
+   全部受登录保护（write）。 */
+app.get('/api/wishes', requireAuth, (_req, res) => {
+  res.json(getWishes());
+});
+/* 写/改某地点的心愿注解（覆盖式：前端传完整的注解对象） */
+app.put('/api/wishes/annotations/:placeId', write, (req, res) => {
+  try {
+    upsertWishAnnotation({ place_id: req.params.placeId, ...(req.body || {}) });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message || '保存失败' }); }
+});
+app.post('/api/wishes/places', write, (req, res) => {
+  try {
+    const id = saveWishPlace(req.body || {});
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ error: e.message || '保存失败' }); }
+});
+app.put('/api/wishes/places/:id', write, (req, res) => {
+  try {
+    const id = saveWishPlace({ ...(req.body || {}), id: req.params.id });
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ error: e.message || '保存失败' }); }
+});
+app.delete('/api/wishes/places/:id', write, (req, res) => {
+  try { deleteWishPlace(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message || '删除失败' }); }
 });
 
 /* ----------------------------- 批量 GPS 归档 -----------------------------

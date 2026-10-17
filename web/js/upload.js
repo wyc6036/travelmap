@@ -24,29 +24,12 @@ let tempMarker = null;
 let pickMode = false;
 let pickHandler = null;
 let editingId = null;            // 非 null = 编辑模式
+let editingType = null;          // 编辑模式下原地点类型（下拉里已无「目的地」选项，需保留原值防误改）
+let editingDefaultSelType = null;// 编辑时若原类型无法在 dropdown 表达，浏览器回落到的默认选中值
 let existingMedia = [];          // 编辑模式下该地点的已有媒体（含 id）
 let cityAC = null;               // 城市自动补全下拉
 
 function $(id) { return document.getElementById(id); }
-
-const DEST_TYPE = '目的地';
-
-/* 类型为「目的地」（还没去过）时，隐藏媒体上传与笔记输入，
-   并清空可能残留的值，避免随提交悄悄上传尚不存在的素材。 */
-function syncTypeVisibility() {
-  const isDest = ($('tm-add-type')?.value || '') === DEST_TYPE;
-  ['tm-add-files', 'tm-add-caption', 'tm-add-note'].forEach((id) => {
-    const el = $(id);
-    if (!el) return;
-    const row = el.closest('.form-row');
-    if (row) row.classList.toggle('is-hidden', isDest);
-  });
-  if (isDest) {
-    const f = $('tm-add-files'); if (f) f.value = '';
-    const c = $('tm-add-caption'); if (c) c.value = '';
-    const n = $('tm-add-note'); if (n) n.value = '';
-  }
-}
 
 function resetForm() {
   if (form) form.reset();
@@ -56,6 +39,8 @@ function resetForm() {
   removeTempMarker();
   // 退出编辑态
   editingId = null;
+  editingType = null;
+  editingDefaultSelType = null;
   existingMedia = [];
   renderExistingMedia();
   const title = $('tm-add-title');
@@ -256,9 +241,6 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
     startPick();
   });
 
-  /* 类型切换：目的地隐藏媒体/笔记输入 */
-  $('tm-add-type')?.addEventListener('change', syncTypeVisibility);
-
   /* 城市自动补全 */
   $('tm-add-city')?.addEventListener('input', onCityInput);
   $('tm-add-city')?.addEventListener('focus', onCityInput);
@@ -278,7 +260,6 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
 function open() {
   if (!modal) return;
   resetForm();
-  syncTypeVisibility();
   modal.hidden = false;
   $('tm-add-name')?.focus();
 }
@@ -300,6 +281,10 @@ function edit(place) {
   const set = (id, v) => { const el = $(id); if (el) el.value = (v == null ? '' : v); };
   set('tm-add-name', place.name);
   set('tm-add-type', place.type);
+  /* 记录原类型：下拉已移除「目的地」选项，若原类型是「目的地」浏览器无法选中，
+     会在提交时回落成其它类型，把心愿地点误改成普通足迹 —— 这里记下原值以便提交时还原。 */
+  editingType = place.type;
+  editingDefaultSelType = $('tm-add-type')?.value || null;
   set('tm-add-date', place.date);
   set('tm-add-enddate', place.endDate);
   const lng = place.lng != null ? place.lng : (place.coord && place.coord[0]);
@@ -313,7 +298,6 @@ function edit(place) {
   const title = $('tm-add-title');
   if (title) title.textContent = '编辑足迹';
   renderExistingMedia();
-  syncTypeVisibility();
   modal.hidden = false;
   $('tm-add-name')?.focus();
 }
@@ -379,10 +363,17 @@ async function submit() {
   const lngS = r5(lng);
   const latS = r5(lat);
 
+  /* 编辑模式下，若原类型是下拉里已删除的「目的地」（浏览器无法选中、回落成默认项），
+     且用户没手动改过类型，则还原为原类型，避免把心愿地点误改成普通足迹。 */
+  const selType = $('tm-add-type')?.value || '旅行';
+  const type = (editingId && editingType && editingDefaultSelType != null && selType === editingDefaultSelType)
+    ? editingType
+    : selType;
+
   const place = {
     name,
     coord: [lngS, latS],
-    type: $('tm-add-type')?.value || '旅行',
+    type,
     date: $('tm-add-date')?.value || '',
     end_date: $('tm-add-enddate')?.value || '',     // ⚠️ 后端 db 读 end_date（原 endDate 字段名是 bug）
     countryCode: ($('tm-add-country')?.value || '').trim(),
