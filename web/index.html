@@ -231,8 +231,11 @@ if (location.protocol === 'file:') {
             </button>
           </div>
 
-          <!-- 地图状态：瓦片异常时低调提示 -->
-          <div class="mapcard__status" id="tm-map-status" hidden></div>
+          <!-- 地图状态：底图加载失败/受限时低调提示，含手动「重试」按钮 -->
+          <div class="mapcard__status" id="tm-map-status" hidden>
+            <span id="tm-map-status-msg"></span>
+            <button class="mapcard__status-btn" id="tm-map-retry" type="button" hidden>重试</button>
+          </div>
         </div>
 
         <!-- 地图页下半区：iOS 风格可编辑小组件网格（磁贴）。
@@ -277,6 +280,9 @@ if (location.protocol === 'file:') {
   <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="tm-modal-title">
     <button class="modal__close" id="tm-modal-close" aria-label="关闭">
       <svg class="ico" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+    </button>
+    <button class="modal__fs" id="tm-modal-fs" type="button" aria-label="全屏视图" aria-pressed="false">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg>
     </button>
 
     <div class="modal__mapwrap" id="tm-modal-mapwrap">

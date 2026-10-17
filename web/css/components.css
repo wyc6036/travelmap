@@ -559,13 +559,30 @@
 .mapcard__status {
   position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
   z-index: var(--z-map-overlay);
+  display: flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 24px);
   padding: 5px 12px;
   font-size: var(--fs-xs);
   color: var(--ink-2);
   background: var(--glass-strong);
   border-radius: var(--r-pill);
   box-shadow: var(--sh-2);
+  backdrop-filter: blur(8px);
 }
+.mapcard__status-btn {
+  flex: none;
+  margin: -2px -4px -2px 0;
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
+  color: var(--ink-1);
+  background: var(--glass-strong);
+  border: 1px solid var(--line-2, rgba(255,255,255,.18));
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background var(--dur-fast, .2s) var(--ease, ease);
+}
+.mapcard__status-btn:hover { background: var(--glass, rgba(255,255,255,.12)); }
+.mapcard__status-btn:active { transform: translateY(1px); }
 
 /* =========================================================
    地图图钉（替换 Ref_Globe 的呼吸圆点）

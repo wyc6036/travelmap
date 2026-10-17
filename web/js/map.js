@@ -15,10 +15,16 @@
  */
 
 import { CONFIG, COLORS } from './config.js';
-import { warnOnce, hexToRgba } from './utils.js';
+import { warnOnce, hexToRgba, toast } from './utils.js';
 
 const styleHooks = new Set();
 let tileErrorCount = 0;
+
+/* 底图 style 加载状态：按 map 实例记录，避免污染地图对象本身。
+   failed 表示正处于「style 拉取失败」态；retries 达上限后只给手动重试。 */
+const styleState = new WeakMap();
+const MAX_STYLE_RETRIES = 5;
+const STYLE_RETRY_BASE_MS = 2000;
 
 /** 暖色底图覆盖：把底图图层改成项目调色板 */
 export function applyWarmStyle(map) {
@@ -167,28 +173,64 @@ export function createMap(container, overrides = {}) {
     fadeDuration: 200,
   });
 
+  /* 记录该 map 的底图状态（初始 style 由构造函数传入，先登记 key + 未加载态）。 */
+  const containerEl = typeof container === 'string' ? document.getElementById(container) : container;
+  const isMain = containerEl?.id === 'tm-map';
+  styleState.set(map, {
+    key: CONFIG.defaultStyle,
+    loaded: false,
+    pending: true,
+    retries: 0,
+    timer: 0,
+    failed: false,
+    isMain,
+  });
+  if (isMain) {
+    document.getElementById('tm-map-retry')?.addEventListener('click', () => retryNow(map));
+  }
+
   /* 归属信息：放左上角（左下角被"足迹概览"卡片占用，右下角是图例）。
      保持 compact 收起态，既不遮挡内容，也满足底图署名要求。 */
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-left');
-  /* 瓦片/样式报错：只计数 + 一次性 console.warn，不往控制台刷 error */
+  /* 瓦片/样式报错：区分「style 拉取失败」与「瓦片错误」 */
   map.on('error', (e) => {
+    const st = styleState.get(map);
+    /* style 拉取失败（或精灵/字形等初始资源失败）：既没有 sourceId 也没有 tile，
+       且当前 style 尚未加载完成 → 视为底图源没连上，进入自动重试流程。
+       瓦片错误会带 sourceId/tile，走下面的计数逻辑。 */
+    const isStyleFail = !st?.loaded && !e?.sourceId && !e?.tile;
+    if (isStyleFail) {
+      scheduleStyleRetry(map);
+      return;
+    }
     tileErrorCount += 1;
     const msg = e?.error?.message || '未知错误';
     warnOnce('tile-error', `底图瓦片加载异常（不影响本地数据展示）：${msg}`);
     if (tileErrorCount === 8) {
-      document.getElementById('tm-map-status')?.removeAttribute('hidden');
-      const node = document.getElementById('tm-map-status');
-      if (node) node.textContent = '底图瓦片加载受限，本地足迹数据仍可正常查看';
+      setMapStatus(map, '底图瓦片加载受限，本地足迹数据仍可正常查看', false);
     }
   });
 
   /* 样式每次加载完成（首次 + 切换后）都要重新套用覆盖与自定义图层 */
   map.on('style.load', () => {
+    const st = styleState.get(map);
+    if (st) {
+      st.loaded = true;
+      st.pending = false;
+      st.retries = 0;
+      if (st.timer) { clearTimeout(st.timer); st.timer = 0; }
+    }
     applyWarmStyle(map);
     applyChineseLabels(map);
     styleHooks.forEach((fn) => {
-      try { fn(map); } catch (err) { warnOnce(`hook-${fn.name}`, `样式钩子执行失败：${err.message}`); }
+      try { fn(map); } catch (err) { warnOnce(`hook-${fn.name}`, `样式钩子执行错误：${err.message}`); }
     });
+    /* 若本次是从失败态恢复，给用户一个明确反馈并收起提示条 */
+    if (st?.failed) {
+      toast('底图已恢复');
+      st.failed = false;
+      hideMapStatus(map);
+    }
   });
 
   /**
@@ -208,10 +250,77 @@ export function createMap(container, overrides = {}) {
   return map;
 }
 
-/** 切换底图样式（positron / liberty / bright） */
+/**
+ * 底图 style 加载失败时：指数退避自动重试（2s→4s→8s…最多 MAX_STYLE_RETRIES 次），
+ * 重试耗尽则常驻提示 + 亮出「重试」按钮，交给用户手动触发。
+ * （已有一个重试定时器在途时直接返回，避免错误事件叠加出多个定时器。）
+ */
+function scheduleStyleRetry(map) {
+  const st = styleState.get(map);
+  if (!st || st.timer) return;
+  st.failed = true;
+  if (st.retries >= MAX_STYLE_RETRIES) {
+    setMapStatus(map, '底图加载失败，请检查网络后点「重试」', true);
+    return;
+  }
+  const delay = STYLE_RETRY_BASE_MS * Math.pow(2, st.retries);
+  st.retries += 1;
+  toast(`底图加载失败，正在重试（${st.retries}/${MAX_STYLE_RETRIES}）…`);
+  setMapStatus(map, '底图加载失败，正在重试…', false);
+  st.timer = setTimeout(() => {
+    st.timer = 0;
+    if (styleState.get(map)?.loaded) return;   // 期间已自行恢复
+    setBaseStyle(map, st.key);
+  }, delay);
+}
+
+/** 用户手动点「重试」：立即重设 style 并清零重试计数 */
+function retryNow(map) {
+  const st = styleState.get(map);
+  if (!st) return;
+  if (st.timer) { clearTimeout(st.timer); st.timer = 0; }
+  st.retries = 0;
+  st.failed = false;
+  hideMapStatus(map);
+  toast('正在重新加载底图…');
+  setBaseStyle(map, st.key);
+}
+
+/** 在地图区状态条上显示一条提示（仅主地图，弹窗小地图不显示） */
+function setMapStatus(map, msg, withRetry) {
+  const st = styleState.get(map);
+  if (!st?.isMain) return;
+  const bar = document.getElementById('tm-map-status');
+  if (!bar) return;
+  const msgEl = document.getElementById('tm-map-status-msg');
+  const btn = document.getElementById('tm-map-retry');
+  if (msgEl) msgEl.textContent = msg;
+  if (btn) btn.hidden = !withRetry;
+  bar.hidden = false;
+}
+
+/** 收起地图区状态条（仅主地图） */
+function hideMapStatus(map) {
+  const st = styleState.get(map);
+  if (!st?.isMain) return;
+  const bar = document.getElementById('tm-map-status');
+  if (bar) bar.hidden = true;
+}
+
+/** 切换底图样式（positron / liberty / bright）。
+ *  同时登记该 map 的 style 状态，供「加载失败自动重试」使用。 */
 export function setBaseStyle(map, key) {
   const url = CONFIG.styles[key];
   if (!url) return false;
+  const st = styleState.get(map) || {
+    retries: 0, timer: 0, loaded: false, failed: false,
+    isMain: map.getContainer()?.id === 'tm-map',
+  };
+  st.key = key;
+  st.loaded = false;
+  st.pending = true;
+  if (st.timer) { clearTimeout(st.timer); st.timer = 0; }
+  styleState.set(map, st);
   map.setStyle(url);
   return true;
 }

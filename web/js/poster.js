@@ -40,13 +40,34 @@ export function createPoster({ root, onOpen }) {
      （.pw__face 的 background:var(--surface-3)），不再铺模糊蒙版。
      这样无论格子是 1×1、1×2 还是 2×2，照片比例都能自然适应、不被硬裁，
      错落排布的同时也不会被压成横条。 */
+  /** 记录媒体宽高比（用于按比例分派：横格优先横图、竖格优先竖图） */
+  function markAr(item, w, h) { if (w && h) item._ar = w / h; }
+
   function paintFace(face, item) {
     face.innerHTML = '';
+    const displaySrc = item.kind === 'video' ? (item.poster || '') : item.src;
+
+    /* 毛玻璃衬底：同图放大 + 高斯模糊铺满整格。
+       照片（object-fit:contain）留白处露出的是"同图的虚化版"而不是生硬底色，
+       消除比例错配时的大片色条。视频无封面时不加衬底（避免双路解码），
+       退回 .pw__back 的底色兜底。 */
+    const back = document.createElement('div');
+    back.className = 'pw__back';
+    if (displaySrc) {
+      const bi = document.createElement('img');
+      bi.className = 'pw__back-img';
+      bi.src = displaySrc;
+      bi.alt = '';
+      const onBack = () => { markAr(item, bi.naturalWidth, bi.naturalHeight); bi.classList.add('ok'); };
+      if (bi.complete && bi.naturalWidth) onBack();
+      else bi.addEventListener('load', onBack, { once: true });
+      back.append(bi);
+    }
+    face.append(back);
 
     const wrap = document.createElement('div');
     wrap.className = 'pw__wrap';
     let media;
-    let src = '';
 
     if (item.kind === 'video' && !item.poster) {
       media = document.createElement('video');
@@ -61,13 +82,13 @@ export function createPoster({ root, onOpen }) {
         media.classList.add('ok');
       }, { once: true });
     } else {
-      src = item.kind === 'video' ? item.poster : item.src;   // 有封面就用封面
       media = document.createElement('img');
       media.className = 'pw__media';
-      media.src = src;
+      media.src = displaySrc;
       media.alt = item.title || '';
-      if (media.complete && media.naturalWidth) media.classList.add('ok');
-      else media.addEventListener('load', () => media.classList.add('ok'), { once: true });
+      const onReady = () => { markAr(item, media.naturalWidth, media.naturalHeight); media.classList.add('ok'); };
+      if (media.complete && media.naturalWidth) onReady();
+      else media.addEventListener('load', onReady, { once: true });
     }
     wrap.append(media);
 
@@ -95,7 +116,7 @@ export function createPoster({ root, onOpen }) {
     if (item._p) return item._p;
     item._p = new Promise((res) => {
       const im = new Image();
-      im.onload = () => res(true);
+      im.onload = () => { markAr(item, im.naturalWidth, im.naturalHeight); res(true); };
       im.onerror = () => res(false);
       im.src = item.kind === 'video' ? item.poster : item.src;
     });
@@ -105,7 +126,20 @@ export function createPoster({ root, onOpen }) {
   /** 最多等 2.5s：图片一直不来也照翻（淡入会在它到位时补上，总比卡住不动强） */
   const preloadSoft = (item) => Promise.race([preload(item), new Promise((r) => setTimeout(() => r(false), 2500))]);
 
+  /* 按比例分派：先用格子比例筛出"同朝向"的候选（横格→横图、竖格→竖图），
+     没有匹配再回退随机。剩下的轻微错配由毛玻璃衬底兜底。 */
   function pickNext(rec) {
+    const ar = rec.ar;
+    if (ar && pool.length) {
+      const wantLand = ar > 1.15;     // 明显横向的格子
+      const wantPort = ar < 0.87;     // 明显竖向的格子
+      if (wantLand || wantPort) {
+        const matched = pool.filter((it) =>
+          it !== rec.cur && typeof it._ar === 'number' &&
+          (wantLand ? it._ar >= 0.9 : it._ar <= 1.12));
+        if (matched.length) return matched[Math.floor(Math.random() * matched.length)];
+      }
+    }
     let next = rec.cur;
     for (let guard = 0; guard < 12 && next === rec.cur; guard += 1) {
       next = pool[Math.floor(Math.random() * pool.length)];
@@ -182,6 +216,11 @@ export function createPoster({ root, onOpen }) {
       root.classList.toggle('posterwall--wide', ar > AR_WIDE && ar <= AR_UW);
       root.classList.toggle('posterwall--uw', ar > AR_UW);
     }
+    // 记录每块格子自身的宽高比，供 pickNext 按比例分派（横格→横图、竖格→竖图）
+    blocks.forEach((b) => {
+      const cw = b.el.clientWidth, ch = b.el.clientHeight;
+      if (cw && ch) b.ar = cw / ch;
+    });
     clampHeight();
   }
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => applyLayout()) : null;
@@ -203,7 +242,7 @@ export function createPoster({ root, onOpen }) {
       el.append(inner);
       root.append(el);
 
-      const rec = { el, inner, faces: [f1, f2], rot: 0, cur: null, timer: 0 };
+      const rec = { el, inner, faces: [f1, f2], rot: 0, cur: null, timer: 0, ar: 0 };
       // 翻牌动画结束后把累加角度归零：rotateY 角度若无限增大，三角函数浮点精度会
       // 逐渐漂移，在合成层表现为翻牌时亚像素左右抖动。360° 与 0° 视觉完全等价，
       // 翻完瞬移归零不可见，但能彻底避免角度失控。

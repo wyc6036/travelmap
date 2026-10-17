@@ -103,6 +103,9 @@ export function createDetailModal({
   const closeBtn = document.getElementById('tm-modal-close');
   const editBtn = document.getElementById('tm-modal-edit');
   const deleteBtn = document.getElementById('tm-modal-delete');
+  const fsBtn = document.getElementById('tm-modal-fs');
+  const headEl = bodyEl.querySelector('.modal__head');
+  const padEl = bodyEl.querySelector('.modal__pad');
 
   const lightbox = document.getElementById('tm-lightbox');
   const lbStage = document.getElementById('tm-lb-stage');
@@ -122,6 +125,8 @@ export function createDetailModal({
   let boundStyleKey = null;
   let scrollMaxH = 320;
   let lastFocus = null;
+  /** 全屏分栏视图是否开启（点右上角 ⤢ 切换） */
+  let fsActive = false;
 
   /* 行程模式里被点选的站点（place id，null = 没选）。
      选中后：下面的媒体只显示那一站的，地图上其余打点压灰。点地图空白恢复。 */
@@ -259,6 +264,7 @@ export function createDetailModal({
    * ========================================================= */
 
   function syncScrollEffect() {
+    if (fsActive) return;          // 全屏分栏下地图恒满高，不随滚动收缩
     // 收缩行程 = 地图最大高度 - 最小高度；滚动量与收缩量严格 1:1，
     // 于是标题始终贴着地图下沿（推导见 css/modal.css 中 .modal__body 注释）。
     const dist = Math.max(1, scrollMaxH - MIN_MAP_H);
@@ -851,6 +857,9 @@ export function createDetailModal({
 
   /** 打开后的公共挂载流程。地点与行程只有"上半部地图怎么画"不同。 */
   function mount(view) {
+    // 仅在"从关闭态重新打开"时清掉可能残留的全屏态；
+    // 弹窗已开着时（点邻近图钉切换地点）保留全屏布局，只换内容。
+    if (modal.hidden && fsActive) exitFs();
     current = view;
     stopFilter = null;                        // 新内容没有"上一次选中的站"
 
@@ -929,6 +938,7 @@ export function createDetailModal({
       modal.hidden = true;
       modal.classList.remove('is-closing');
       document.body.classList.remove('is-modal-open');
+      exitFs();                   // 关闭时还原全屏分栏的 DOM，确保下次打开是常规布局
       current = null;
       /* 弹窗完全关闭后通知外部（主图用它在 closeLightbox 之后把激活图钉
          恢复成普通大小——见 main.js 的 onClosed → markers.setActive(null)） */
@@ -940,6 +950,59 @@ export function createDetailModal({
     if (reduce) done();
     else setTimeout(done, 240);
   }
+
+  /* =========================================================
+   * 全屏视图（左右分栏）
+   * ---------------------------------------------------------
+   * 右上角 ⤢ 按钮在「常规」与「全屏分栏」两种布局间切换：
+   *   · 常规：地图在上、媒体在下（沿用既有滚动收缩逻辑）。
+   *   · 全屏：左栏 = 地图 + 地点名称/日期等信息，右栏 = 多媒体网格。
+   * 切换把 #tm-modal-mapwrap 与 .modal__head 临时搬进一个 .modal__left
+   * 容器、并给 .modal 加 .modal--fullscreen；退出时把 DOM 还原，
+   * 保证常规模式完全不受影响（地图实例本身不重建，只 resize）。
+   * ========================================================= */
+  const ICON_EXPAND = '<svg class="ico" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg>';
+  const ICON_COLLAPSE = '<svg class="ico" viewBox="0 0 24 24"><path d="M9 4v4a1 1 0 0 1-1 1H4M15 4v4a1 1 0 0 0 1 1h4M9 20v-4a1 1 0 0 0-1-1H4M15 20v-4a1 1 0 0 1 1-1h4"/></svg>';
+  function setFsIcon(on) { if (fsBtn) fsBtn.innerHTML = on ? ICON_COLLAPSE : ICON_EXPAND; }
+
+  function enterFs() {
+    if (fsActive || modal.hidden) return;
+    fsActive = true;
+    modal.classList.add('modal--fullscreen');
+    // 复位地图收缩相关变量（全屏下地图恒满高，--mw-p/--mw-blur 不应残留）
+    panel.style.setProperty('--mw-p', '0');
+    panel.style.setProperty('--mw-blur', '0px');
+    const left = document.createElement('div');
+    left.className = 'modal__left';
+    panel.insertBefore(left, bodyEl);
+    left.append(mapwrapEl, headEl);
+    padEl.style.display = 'none';
+    setFsIcon(true);
+    if (fsBtn) { fsBtn.setAttribute('aria-pressed', 'true'); fsBtn.setAttribute('aria-label', '退出全屏视图'); }
+    bodyEl.scrollTop = 0;
+    // 布局切换后容器尺寸变了，地图必须 resize 才能铺满左栏
+    requestAnimationFrame(() => { try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ } });
+  }
+
+  function exitFs() {
+    if (!fsActive) return;
+    fsActive = false;
+    modal.classList.remove('modal--fullscreen');
+    // 先还原 .modal__head（紧跟占位块，恢复原有的 pad → head → tabs → content 顺序）
+    padEl.after(headEl);
+    // 再把地图容器移回 body 之前、删掉临时左栏
+    panel.insertBefore(mapwrapEl, bodyEl);
+    const left = panel.querySelector('.modal__left');
+    if (left) left.remove();
+    padEl.style.display = '';
+    setFsIcon(false);
+    if (fsBtn) { fsBtn.setAttribute('aria-pressed', 'false'); fsBtn.setAttribute('aria-label', '全屏视图'); }
+    bodyEl.scrollTop = 0;
+    // 仅在可见时 resize（隐藏态下容器为 0，resize 会报错且无意义）
+    if (!modal.hidden) requestAnimationFrame(() => { try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ } });
+  }
+
+  function toggleFs() { if (fsActive) exitFs(); else enterFs(); }
 
   /* =========================================================
    * 详情页：补充上传媒体（图片 / 视频 / 文本）
@@ -963,6 +1026,7 @@ export function createDetailModal({
    * ========================================================= */
   bodyEl.addEventListener('scroll', onScroll, { passive: true });
   closeBtn.addEventListener('click', close);
+  fsBtn?.addEventListener('click', toggleFs);
 
   /* 详情页：头部「添加媒体」按钮（仅单地点模式可用，可见性由 mount 控制） */
   $('tm-modal-addbtn')?.addEventListener('click', openUploadModal);
@@ -1010,6 +1074,12 @@ export function createDetailModal({
       return;
     }
     if (!modal.hidden && e.key === 'Escape') { e.preventDefault(); close(); }
+    if (!modal.hidden && (e.key === 'f' || e.key === 'F')) {
+      // 别在输入框里打字时误触发（媒体编辑弹窗有 input/textarea）
+      const t = e.target;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (!typing) { e.preventDefault(); toggleFs(); }
+    }
   });
 
   window.addEventListener('resize', () => {
