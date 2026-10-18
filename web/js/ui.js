@@ -769,8 +769,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       ${wlCover(p)}
       ${canceled
         ? `<div class="wl-card__acts">
-             <button class="wl-card__act wl-card__restore" data-act="restore" type="button" title="恢复心愿" aria-label="恢复">↺</button>
-             ${p.isWishNew ? '<button class="wl-card__act wl-card__del" data-act="wishdel" type="button" title="删除心愿地点" aria-label="删除">🗑</button>' : ''}
+             <button class="wl-card__act wl-card__restore" data-act="restore" type="button" title="恢复心愿" aria-label="恢复">↺ 恢复</button>
+             <button class="wl-card__act wl-card__del" data-act="wishdel" type="button" title="删除心愿地点" aria-label="删除">🗑 删除</button>
            </div>`
         : `<div class="wl-card__star" data-act="wish" title="想去 / 取消">★</div>`}
       ${done ? '<div class="wl-card__done">✓ 已实现</div>' : ''}
@@ -1307,13 +1307,18 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       renderWishlistView();
     } else if (act === 'wishdel') {
       if (confirm('确定删除该心愿地点吗？此操作不可恢复。')) {
-        deleteWishPlace(card.dataset.id);
+        const p = byWishId(card.dataset.id);
+        if (p && p.isWishNew) deleteWishPlace(card.dataset.id);   // 自建心愿地点：整体删除
+        else setAnn(card.dataset.id, { wish: undefined });         // 真实足迹：仅退出「已取消」回收站，不删足迹
         toast('已删除', 1500);
         renderWishlistView();
       }
     } else if (act === 'clearcanceled') {
       if (confirm('确定清除所有已取消的心愿地点吗？此操作不可恢复。')) {
-        canceledPlaces().forEach((p) => { if (p.isWishNew) deleteWishPlace(p.id); });
+        canceledPlaces().forEach((p) => {
+          if (p.isWishNew) deleteWishPlace(p.id);                 // 自建心愿地点：整体删除
+          else setAnn(p.id, { wish: undefined });                 // 真实足迹：仅退出回收站
+        });
         toast('已清除', 1500);
         renderWishlistView();
       }

@@ -132,16 +132,19 @@
 }
 .wl-card__edit:hover { background: var(--primary-soft); }
 
-/* 已取消卡片：恢复 / 删除 操作行（左恢复、右删除） */
+/* 已取消卡片：恢复 / 删除 —— 固定在卡片右上角（覆盖封面之上），而非占位图下方 */
 .wl-card.is-canceled { opacity: .82; }
-.wl-card__acts { display: flex; gap: 6px; margin-top: 9px; }
-.wl-card__act {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  font-size: 11.5px; border-radius: var(--r-pill); padding: 5px 10px; cursor: pointer;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2);
+.wl-card__acts {
+  position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px;
 }
-.wl-card__act:hover { background: var(--surface-3); }
-.wl-card__restore { color: var(--primary-ink); background: var(--primary-tint); border-color: var(--line-2); font-weight: 600; }
+.wl-card__act {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  font-size: 11px; border-radius: var(--r-pill); padding: 4px 9px; cursor: pointer; line-height: 1.4;
+  border: 1px solid var(--line-2); color: var(--ink-2); box-shadow: var(--sh-1);
+  background: var(--glass-strong); backdrop-filter: blur(2px);
+}
+.wl-card__act:hover { background: var(--surface); }
+.wl-card__restore { color: var(--primary-ink); background: var(--primary-tint); border-color: var(--primary); font-weight: 600; }
 .wl-card__restore:hover { background: var(--primary-soft); }
 .wl-card__del { color: #B4503A; border-color: #E8CBBF; background: #FBEFEA; }
 .wl-card__del:hover { background: #F6E0D7; }

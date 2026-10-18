@@ -12,3 +12,7 @@ data/media/
 node_modules/
 # macOS
 .DS_Store
+# 测试 / 预览产物（Playwright 截图、设计稿 HTML 等，非源码，勿提交）
+preview/
+# 种子数据备份（非源码）
+data/seed/*.bak
