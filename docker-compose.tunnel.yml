@@ -1,0 +1,48 @@
+# =========================================================
+# docker-compose.tunnel.yml · CF Tunnel 公网暴露层（overlay）
+#
+# 这是「零改动」方案：你现有的 travelmap / minio 服务一行不用改，
+# 只是额外起一个 cloudflared 边车容器，把 8080 端口通过
+# Cloudflare 隧道暴露到公网。ffmpeg 转码、sharp、MinIO 全部原样跑。
+#
+# ── 正式用法（绑定自己的域名，长期用）────────────────────
+#   1. 域名 NS 托管到 Cloudflare（免费 plan 即可）
+#   2. CF 后台 → Networks（网络） → Tunnels（隧道） → Create tunnel
+#      → 选 Cloudflared → 起个名字（如 travelmap） → 复制给出的 token
+#   3. 在 .env 里加一行：
+#        CF_TUNNEL_TOKEN=eyJhIjoiXXXX....（很长一串）
+#   4. 叠加启动：
+#        docker compose -f docker-compose.prod.yml -f docker-compose.tunnel.yml up -d
+#      （本地构建版把第一个文件换成 docker-compose.yml）
+#   5. 回隧道后台 → Public Hostnames → Add：
+#        Subdomain: travel    Domain: 你的域名.com
+#        Service Type: HTTP    URL: travelmap:8080   ← 容器名，不要加 http://
+#   6. 等日志出现 "Registered tunnel connection"：
+#        docker logs -f travelmap-tunnel
+#      之后 https://travel.你的域名.com 即可公网访问，TLS 证书 CF 自动签发。
+#   卸载 = 删掉 cloudflared 服务再 up -d 即可，零残留。
+#
+# ── 快速体验（免域名 / 免 token，5 分钟看到效果）──────────
+#   docker run --rm --network host cloudflare/cloudflared:latest \
+#     tunnel --url http://localhost:8080
+#   终端会打印一个 https://xxxx-yyyy.trycloudflare.com，立刻可访问。
+#   注意：这是临时域名，每次重启都变，仅供体验，不要当日常入口。
+#
+# ── 已知限制（免费 plan，提前说清）────────────────────────
+#   · 单请求 body ≤ 100MB：手机原图（2~10MB）无感；
+#     将来传 >100MB 的原始视频会被 CF 拒（413），
+#     该场景走局域网 IP 直传（compose 里 8080 端口映射还留着，就是干这个的）。
+#   · 出站带宽不限量，CF 不收 HTTP 流量费；实际速度天花板是家用宽带上行。
+#   · 安全增益：隧道是出站长连接，路由器不用开任何端口映射。
+# =========================================================
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: travelmap-tunnel
+    restart: unless-stopped
+    environment:
+      # 从 CF 隧道后台复制；token 模式无需在宿主机装 cloudflared，
+      # ingress 规则全部在后台图形化维护，零本地配置文件。
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN:?请先在 CF 后台创建隧道，并把 token 填进同级 .env 的 CF_TUNNEL_TOKEN}
+    # TUNNEL_TOKEN 模式下 cloudflared 自动读取 token，无需其它参数
+    command: tunnel --no-autoupdate run

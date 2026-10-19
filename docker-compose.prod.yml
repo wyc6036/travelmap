@@ -11,7 +11,12 @@
 # =========================================================
 services:
   minio:
-    image: minio/minio:latest
+    # MinIO 官方自 2025-10 起停止分发 Docker 镜像（社区版改为仅源码发布），
+    # Docker Hub / Quay 上的 minio/minio 镜像已全部下线、无法拉取。
+    # 改用 Chainguard 从官方源码持续重建的免费镜像（同一份 MinIO，S3 协议与
+    # 数据格式完全兼容，默认非 root 运行，已验证现有 minio-data 可直接挂载）：
+    # https://www.chainguard.dev/unchained/secure-and-free-minio-chainguard-containers
+    image: cgr.dev/chainguard/minio:latest
     container_name: travelmap-minio
     command: server /data --console-address ":9001"
     environment:

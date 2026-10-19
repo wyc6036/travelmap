@@ -88,6 +88,8 @@ docker compose logs -f travelmap
 
 > 想停掉：`docker compose down`（数据在 `./data`、`./minio-data` 里，不会丢）。
 
+> 📦 **关于内置 MinIO 镜像**：MinIO 官方自 2025-10 起停止分发 Docker 镜像（社区版改为仅源码发布），Docker Hub / Quay 上的 `minio/minio` 镜像已全部下线、`docker pull` 报 `not found`。因此 compose 里的 minio 服务已改用 **Chainguard 从官方源码持续重建的免费镜像** `cgr.dev/chainguard/minio:latest`（同一份 MinIO，S3 协议与数据格式完全兼容，默认非 root 运行；现有 `./minio-data` 可直接挂载沿用，无需迁移）。详见 [Chainguard 公告](https://www.chainguard.dev/unchained/secure-and-free-minio-chainguard-containers)。
+
 ### 3. 首屏配置向导（首次必看）
 
 第一次进入（或 `setupDone` 标记被清掉时）会弹出**配置向导**，让你选媒体存哪：

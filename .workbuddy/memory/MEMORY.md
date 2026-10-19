@@ -25,3 +25,8 @@
 - 前端是 ESM（`main.js` 用相对路径 `./js/...`），必须经 HTTP 静态服务访问，不能用 `file://`（CORS 会被拦）。
 - 无后端时 `loadPlaces` 首载失败会回落内置 FALLBACK 数据，应用仍可 boot；真实部署用 `docker compose up`。
 - 本地起后端测试：`PORT=8126 node server.js`（MinIO `ENOTFOUND` 会重试约 15 次后回落本地磁盘，最终监听成功、auth=off）。本地端口用 Playwright **直连**即可（Playwright 不走系统代理）；用 curl 需 `--noproxy '*'`。测试库 `data/travelmap.db` 已 seed，5 个地点有媒体（黄龙 74 / 九寨沟 46 / 天津 14 / 成都 10 / 杭州 6），主图图钉 `title` 形如 `名称 · 国家`（前缀匹配用 `[title^="名称"]`）。
+
+## MinIO 镜像已换源（2026-10-19，长期有效）
+- **`minio/minio:latest` 已无法拉取**（官方 2025-10 起停发 Docker 镜像，Docker Hub/Quay 全线下线；本机仅剩 2024-05 旧缓存）。compose 的 minio 服务已改用 **`cgr.dev/chainguard/minio:latest`**（Chainguard 从官方源码重建，免费，当前版本 RELEASE.2026-09-22T19-25-18Z）。**不要再改回 `minio/minio`**；app 侧（minio npm 客户端 / S3 协议 / `travelmap` 桶 / 9000+9001 端口 / `server /data --console-address ":9001"` 命令）全部原样兼容，现有 `./minio-data`（95MB、301 对象）可直接挂载，无需迁移。
+- 换镜像时注意：Chainguard 版入口 `/usr/bin/minio`、默认**非 root（uid 65532）**，对 bind mount 读写无碍（实测）；如需 mc 客户端可用 `cgr.dev/chainguard/minio-client:latest`（`docker run --network <compose网络> -e MC_HOST_tm=http://user:pass@travelmap-minio:9000 ...`）。
+- 沙箱 Docker 拉镜像走 Docker Desktop 守护进程代理 `http.docker.internal:3128`（与 shell 的 `HTTP_PROXY` 不是同一个，后者会 502）；判断某 tag 是否存在只能 `docker pull` 实证，curl 走不通 Docker Hub API。
