@@ -8,3 +8,7 @@ data/media
 *.db
 *.db-shm
 *.db-wal
+# MinIO 运行期对象存储数据，仅由 compose 卷挂载提供，绝不进构建上下文（~95MB，避免无谓上传）
+minio-data
+# 测试/预览产物不进镜像
+preview
