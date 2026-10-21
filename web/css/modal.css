@@ -104,12 +104,6 @@
   transform: translateY(-50%);
 }
 
-/* 被裁掉的顶部量 = (--mw-max − --mw-h)/2，把底图署名下移同样的量，
-   收缩后它仍然落在可见区内（署名跟着地图一起消失会让 OpenFreeMap 的署名要求落空）。 */
-.modal__map .maplibregl-ctrl-attrib {
-  margin-top: calc((var(--mw-max, 320px) - var(--mw-h, var(--mw-max, 320px))) / 2);
-}
-
 /* 轻微模糊层：随滚动进度增强，并用渐变蒙版让"越靠近内容越糊"。
    为什么加蒙版而不是整块一起糊：整块等量模糊会把地图糊成一片奶白，
    反而看不清；蒙版让顶部保持清晰、底部融进内容，才是 ScrollEdgeEffect 的观感。 */
@@ -198,6 +192,12 @@
   border-bottom: 1px solid var(--line-soft);
 }
 .modal__head .typeDot { width: 14px; height: 14px; }
+/* 故事卡专属元素：封面 / 三栏指标 / 一句话备注。
+   常规弹窗是窄栏，塞不下这三块 —— 默认全部隐藏，只在全屏信息卡里出现
+   （见文末「全屏分栏布局」块；渲染由 detail-modal.js 的 renderFsStory 负责）。 */
+.modal__cover,
+.modal__facts,
+.modal__note { display: none; }
 .modal__meta { min-width: 0; }
 .modal__title { font-size: var(--fs-xl); font-weight: 700; }
 .modal__sub { font-size: var(--fs-md); color: var(--ink-2); margin-top: 1px; }
@@ -238,6 +238,31 @@
 
 .modal__content { padding: 18px 22px 26px; }
 .modal__section + .modal__section { margin-top: 24px; }
+
+/* 空状态：没有媒体时右栏原本是一片纯白，看着像"没加载出来" */
+.modal__empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 48px 24px; min-height: 340px; text-align: center;
+}
+.modal__empty-ico {
+  width: 52px; height: 52px; margin-bottom: 4px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface-3);
+  color: var(--ink-3);
+}
+.modal__empty-ico svg { width: 24px; height: 24px; }
+.modal__empty-title { margin: 0; font-size: var(--fs-lg); font-weight: 600; color: var(--ink-2); }
+.modal__empty-sub { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); }
+.modal__empty-btn {
+  margin-top: 10px; height: 34px; padding: 0 16px;
+  border: 0; border-radius: var(--r-sm);
+  background: var(--primary-soft); color: var(--primary-ink);
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease);
+}
+.modal__empty-btn:hover { filter: brightness(.97); }
 
 /* 大图网格（图片 / 视频）—— 交错瀑布流
    ⚠️ 用 CSS columns 实现：每张保持原始比例（不再裁成正方形），
@@ -469,6 +494,7 @@
 .lb-loc__label { display: block; color: rgba(255, 255, 255, .55); font-size: 12px; font-weight: 600; margin-bottom: 5px; }
 .lb-loc__val { font-size: 13.5px; }
 .lightbox__map {
+  position: relative;                    /* 灯箱迷你地图的署名 .tm-map-attrib 定位锚点 */
   margin-top: 12px; height: 196px; border-radius: 10px; overflow: hidden;
   background: #dfe9eb; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14);
 }
@@ -644,71 +670,225 @@
 
 /* ================= 全屏分栏布局 =================
    进入全屏后，JS 会把 #tm-modal-mapwrap 与 .modal__head 临时搬进一个
-   .modal__left 容器；面板改为两列网格：左栏（地图 + 地点信息）/ 右栏（媒体）。
+   .modal__left 容器；面板改为两列网格：左栏（地图卡 + 信息卡）/ 右栏（媒体）。
+   左栏信息呈现（2026-10-21 改「双卡堆叠」方案，用户选型）：
+     · 左栏为 flex column：padding 14px、gap 12px、纸色底（--surface-deep）；
+     · .modal__mapwrap 从"absolute 满铺"改为 flex:1 的**地图卡**：
+       18px 圆角 + 暖色细边 + 轻投影，地图画布在卡内铺满；
+     · .modal__head 从"absolute 悬浮"改为 flex 末项的**信息卡**：
+       同为 18px 圆角白卡 + 细边 + 轻投影，三行结构 = 名称/日期 → 统计 chips → 操作行；
+     · 坐标徽标（.modal__mapbadge）在全屏态隐藏，信息并入卡内 chips；
+     · zoom 控件覆写成 App 风格白圆角组，并收进地图卡内左上 10px；
+     · 地图卡不再遮挡底图署名（署名已改为 .tm-map-attrib 静态链接，
+       锚在 .modal__mapwrap 右下角，不随 .modal__map 上下位移），无需抬升。
    常规模式完全不依赖这些规则。 */
 .modal--fullscreen { padding: 0; }
 .modal--fullscreen .modal__panel {
   width: 100vw; height: 100vh; max-width: none; border-radius: 0;
   display: grid;
-  grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
+  /* 左栏窄一档：38fr → 32fr。三段结构（地图卡 / 故事卡 / 精选条）在 440px 左右
+     刚好够用——地图仍是主角，右栏照片墙拿到更多宽度。 */
+  grid-template-columns: minmax(0, 32fr) minmax(0, 68fr);
   grid-template-rows: 100%;
 }
 .modal--fullscreen .modal__left {
-  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  min-height: 0; min-width: 0;
+  overflow-y: auto;              /* 故事卡变高时先滚动，不裁掉精选条 */
   border-right: 1px solid var(--line-soft);
-  background: var(--map-ocean);
+  background: var(--surface-deep);
 }
 .modal--fullscreen .modal__mapwrap {
-  position: relative; left: auto; right: auto; top: auto;
-  flex: 1 1 auto; min-height: 0; height: auto;
-  border-bottom: none;   /* 地图与信息卡的衔接交给下方模糊过渡条，不再用硬边 */
+  position: relative;            /* 地图卡：flex 项，不再是 absolute 满铺 */
+  flex: 1 1 auto; min-height: 240px;
+  height: auto;
+  border-bottom: none;
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
 }
 .modal--fullscreen .modal__map {
   position: absolute; inset: 0; top: 0; height: 100%; transform: none;
 }
-.modal--fullscreen .modal__map .maplibregl-ctrl-attrib { margin-top: 0; }
-/* 坐标徽标抬到模糊过渡条之上，避免被磨砂模糊 */
-.modal--fullscreen .modal__mapbadge { bottom: 92px; }
+/* zoom 控件 App 风格化：白圆角组 + 暖色细边 + 轻投影（MapLibre 原生是方角灰边） */
+.modal--fullscreen .modal__map .maplibregl-ctrl-group {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line-2);
+  box-shadow: var(--sh-2);
+}
+.modal--fullscreen .modal__map .maplibregl-ctrl-group button { width: 30px; height: 30px; }
+.modal--fullscreen .modal__map .maplibregl-ctrl-group button + button { border-top: 1px solid var(--line-soft); }
+/* zoom 控件收进地图卡内：左上角离卡边 10px，不贴卡沿 */
+.modal--fullscreen .modal__map .maplibregl-ctrl-top-left { top: 10px; left: 10px; }
+/* 坐标徽标：全屏态已并入信息卡 chips，不再单独浮在地图上 */
+.modal--fullscreen .modal__mapbadge { display: none; }
 .modal--fullscreen .modal__mapblur,
 .modal--fullscreen .modal__mapedge { display: none; }
-.modal--fullscreen .modal__head {
-  position: relative;        /* 让 ::before 模糊过渡条定位到卡片上方 */
-  flex: 0 0 auto;
-  /* 信息卡改为两行网格：上排「圆点 + 名称/日期」，下排「操作按钮（可换行）」，
-     避免窄栏里把三个按钮和标题挤在同一行导致文字相互挤压。 */
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-areas:
-    "dot  meta"
-    "acts acts";
-  align-items: center;
-  gap: 12px 10px;
-  min-height: 104px;
-  padding: 16px 18px 16px;
-  background: var(--surface);
-  border-bottom: none;
+
+/* 照片点位：地图上的"我在这拍过什么"图层（缩略圆点，由 detail-modal.js 打点）。
+   显隐胶囊固定在右下、署名之上——常规态左下被坐标徽标占了，全屏态左下留给 zoom。 */
+.modal__mapdots {
+  position: absolute; right: 8px; bottom: 32px; z-index: 3;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 9px;
+  border: 0; border-radius: var(--r-pill);
+  background: var(--glass-strong);
+  color: var(--primary-ink);
+  font-size: var(--fs-xs); font-family: inherit;
+  cursor: pointer;
   box-shadow: var(--sh-1);
 }
-.modal--fullscreen .modal__head .typeDot { grid-area: dot; }
+.modal__mapdots::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--primary);
+}
+.modal__mapdots[hidden] { display: none; }
+.modal__mapdots.is-off { color: var(--ink-3); }
+.modal__mapdots.is-off::before { background: var(--ink-3); }
+/* 点位本体：30px 圆形缩略图。⚠️ 不要在根元素上用 transform，MapLibre 靠
+   transform: translate() 定位 Marker，写在这里会把标记甩到屏幕外。
+   圆角裁切放在 img 上（而不是根元素 overflow:hidden），否则右下角的数量徽标会被裁掉。 */
+.phpin {
+  position: relative;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--surface-3);
+  box-shadow: var(--sh-2);
+  cursor: pointer;
+}
+.phpin img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; transition: transform var(--dur-fast) var(--ease-out); }
+.phpin:hover img { transform: scale(1.12); }
+/* 一簇里有多个拍摄点时，右下角标数量 */
+.phpin__n {
+  position: absolute; right: -5px; bottom: -5px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--primary-ink); color: #fff;
+  border: 1.5px solid #fff;
+  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+}
+
+/* 信息卡（复用 .modal__head）：地图卡下方的静态白卡，与地图卡同一套卡片语言。
+   2026-10-21 升级为「故事卡」：封面 + 标题 → chips → 三栏指标 → 一句话备注 → 操作。
+   左栏原本只有"地图 + 一行 chips"，信息密度过低看着空洞，故事卡把已有数据
+   （媒体拍摄时间 / 设备 / 地点备注）摊开成可读的层级。 */
+.modal--fullscreen .modal__head {
+  position: static;
+  flex: 0 0 auto;
+  display: grid;
+  /* 两列：左侧"身份块"（有照片时是封面，没照片时是类型圆点）+ 右侧标题区。
+     两套 grid-template-areas 由 JS 加的 .has-cover 切换 —— 只用一个模板的话，
+     隐藏的那一格会留出空列，标题被推得莫名其妙。 */
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "dot   meta"
+    "chips chips"
+    "facts facts"
+    "note  note"
+    "acts  acts";
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+}
+.modal--fullscreen .modal__head.has-cover {
+  grid-template-areas:
+    "cover meta"
+    "chips chips"
+    "facts facts"
+    "note  note"
+    "acts  acts";
+}
+.modal--fullscreen .modal__head.has-cover .typeDot { display: none; }
+.modal--fullscreen .modal__head .typeDot { grid-area: dot; width: 12px; height: 12px; }
 .modal--fullscreen .modal__head .modal__meta { grid-area: meta; min-width: 0; }
+.modal--fullscreen .modal__title { font-size: 21px; font-weight: 600; letter-spacing: .2px; line-height: 1.2; }
+.modal--fullscreen .modal__sub { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 3px; }
+
+/* 封面缩略图：该地点第一张照片。没有照片时整列宽度塌成 0（gap 由 grid 承担） */
+.modal--fullscreen .modal__cover {
+  grid-area: cover;
+  display: block;
+  width: 46px; height: 46px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--surface-3);
+}
+.modal--fullscreen .modal__cover[hidden] { display: none; }
+
+/* 三栏指标：首次到访 / 最近一次 / 拍摄设备（行程模式换成 起止 / 天数 / 站点） */
+.modal--fullscreen .modal__facts {
+  grid-area: facts;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.modal--fullscreen .modal__facts[hidden] { display: none; }
+.modal--fullscreen .modal__facts[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.modal__fact { min-width: 0; }
+.modal__fact + .modal__fact { border-left: 1px solid var(--line-soft); padding-left: 10px; }
+.modal__fact-k { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.3; }
+.modal__fact-v {
+  font-size: var(--fs-sm); color: var(--ink); margin-top: 3px; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 一句话备注：有 desc 才出现，没有就整行塌掉（hidden 优先于上面的 display:block） */
+.modal--fullscreen .modal__note {
+  grid-area: note;
+  display: block;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.modal--fullscreen .modal__note[hidden] { display: none; }
+
+/* 统计 chips 行：常规模式整行隐藏，只在全屏信息卡里出现 */
+.modal__chips { display: none; }
+.modal--fullscreen .modal__chips {
+  grid-area: chips;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.modal__chip {
+  font-size: var(--fs-sm); line-height: 1.4;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.modal__chip--kind { color: var(--ink); font-weight: 500; }
+
+/* 操作行：主操作 tonal 胶囊 + 编辑/删除图标钮（隐藏文字标签，见 .modal__bt） */
 .modal--fullscreen .modal__head .modal__actions {
   grid-area: acts;
   margin-left: 0;            /* 铺满下排，不再被推到最右 */
   flex-wrap: wrap; gap: 8px;
 }
-/* 地图（上）与信息卡（下）之间的模糊过渡：一段铺在地图底部的磨砂渐变，
-   从透明 → 信息卡底色，配合 backdrop-filter 把地图底部"晕"进信息卡，
-   而不是一道生硬的边。pointer-events:none，不挡地图交互。 */
-.modal--fullscreen .modal__head::before {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; bottom: 100%;
-  height: 84px;
-  pointer-events: none;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, var(--surface) 100%);
-  -webkit-backdrop-filter: blur(10px) saturate(120%);
-  backdrop-filter: blur(10px) saturate(120%);
+.modal--fullscreen .modal__add { height: 34px; padding: 0 14px; border-radius: var(--r-sm); }
+.modal--fullscreen .modal__edit,
+.modal--fullscreen .modal__delete {
+  width: 34px; height: 34px; padding: 0;
+  border-radius: var(--r-sm);
+  display: grid; place-items: center;
 }
+.modal--fullscreen .modal__edit .modal__bt,
+.modal--fullscreen .modal__delete .modal__bt { display: none; }
+.modal--fullscreen .modal__delete { color: var(--danger); }
+
 .modal--fullscreen .modal__body {
   position: relative; inset: auto;
   overflow-y: auto;
@@ -717,13 +897,110 @@
 .modal--fullscreen .modal__pad { display: none; }
 .modal--fullscreen .modal__tabs { position: sticky; top: 0; z-index: 2; }
 
-/* 窄屏：全屏分栏改为上下堆叠（地图在上、媒体在下），避免两栏挤成一团 */
+/* ================= 媒体竖向时间轴 =================
+   2026-10-21：右栏媒体从"一整片瀑布流"改为按**拍摄日期（天）**分段，
+   左侧一条竖轴把各天串起来，轴上的圆点对应一天的开始。
+   · 时间线范围由数据自己决定（min..max 拍摄时间），不在 CSS 里写死；
+   · 颗粒度 = 天：同一天的照片归一组，跨天跨度 ≥2 天空档给一枚「间隔 N 天」；
+   · 没有拍摄时间的媒体（旧数据）落在最后一段「未标注日期」；
+   · 常规弹窗（窄栏）不显示轴与日期头，退化成原来的连续瀑布流。 */
+.tl { padding: 4px 0 8px; }
+.tl__range { display: none; }
+.tl__group { display: block; margin-bottom: 18px; }
+.tl__group:last-child { margin-bottom: 0; }
+.tl__rail { display: none; }
+.tl__day { min-width: 0; }
+.tl__head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.tl__date { font-size: var(--fs-md); font-weight: 600; color: var(--ink); letter-spacing: .2px; }
+.tl__wd, .tl__n { font-size: var(--fs-xs); color: var(--ink-3); }
+.tl__n { margin-left: auto; }
+.tl__gap {
+  font-size: var(--fs-xs); color: var(--ink-3);
+  background: var(--surface-3); border-radius: var(--r-pill);
+  padding: 2px 8px;
+}
+
+.modal--fullscreen .tl__range {
+  display: block;
+  margin-bottom: 14px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  letter-spacing: .2px;
+}
+.modal--fullscreen .tl__group {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 12px;
+}
+.modal--fullscreen .tl__rail { display: block; position: relative; }
+/* 竖轴线：贯穿整组；最后一组只画到圆点下方一点，收口 */
+.modal--fullscreen .tl__rail::before {
+  content: ''; position: absolute; left: 9px; top: 6px; bottom: -22px;
+  width: 1px; background: var(--line-2);
+}
+.modal--fullscreen .tl__group:last-child .tl__rail::before { bottom: auto; height: 16px; }
+.tl__dot {
+  position: absolute; left: 4px; top: 4px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--primary);
+}
+
+/* ================= 左栏「精选照片」条 =================
+   故事卡与地图卡之外的第三段：把该地点最好看的几张摊出来，
+   让左栏在"看地图"之外还有一个情绪入口（点图直接进灯箱）。
+   只在全屏左栏里存在（enterFs 时才创建）。 */
+.modal--fullscreen .modal__picked {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.modal--fullscreen .modal__picked[hidden] { display: none; }
+.modal__picked-all {
+  border: 0; background: none; padding: 0;
+  font-family: inherit; font-size: inherit;
+  color: var(--primary-ink);
+  cursor: pointer;
+}
+.modal__picked-all:hover { text-decoration: underline; }
+.modal__picked-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-xs); color: var(--ink-2);
+}
+.modal__picked-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.modal__picked-item {
+  position: relative;
+  height: 56px;
+  padding: 0; border: 0; border-radius: var(--r-sm);
+  overflow: hidden; cursor: pointer;
+  background: var(--surface-3);
+  box-shadow: var(--sh-1);
+}
+.modal__picked-item img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform var(--dur-slow) var(--ease-out); }
+.modal__picked-item:hover img { transform: scale(1.08); }
+.modal__picked-item--more {
+  display: grid; place-items: center;
+  background: var(--bg); color: var(--ink-3);
+  box-shadow: none;
+  border: 1px solid var(--line-2);
+  font-size: var(--fs-xs); font-family: inherit;
+}
+
+/* 窄屏：全屏分栏改为上下堆叠（地图在上、媒体在下），避免两栏挤成一团。
+   双卡布局在堆叠态同样成立（地图卡 + 信息卡都在上段内），仅收紧内边距。 */
 @media (max-width: 820px) {
   .modal--fullscreen .modal__panel {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 46%) minmax(0, 1fr);
   }
   .modal--fullscreen .modal__left {
+    padding: 10px; gap: 10px;
     border-right: none; border-bottom: 1px solid var(--line-soft);
   }
+  /* 堆叠态左栏只有 46% 高：地图卡压到 160px，精选条整段收起（右栏就是照片）；
+     故事卡只留"封面 + 标题 + chips + 操作"，指标与备注留给大屏 */
+  .modal--fullscreen .modal__mapwrap { min-height: 160px; }
+  .modal--fullscreen .modal__picked { display: none; }
+  .modal--fullscreen .modal__facts,
+  .modal--fullscreen .modal__note { display: none; }
+  .modal--fullscreen .modal__head { gap: 8px; padding: 12px 14px; }
+  .modal--fullscreen .modal__title { font-size: 17px; }
 }

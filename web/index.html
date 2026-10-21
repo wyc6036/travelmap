@@ -185,6 +185,11 @@ if (location.protocol === 'file:') {
         <div class="mapcard">
           <div class="mapcard__canvas" id="tm-map"></div>
 
+          <!-- 底图署名：MapLibre 的圆形 ⓘ 控件已全局移除，改用常显小字链接
+               （OSM / OpenFreeMap 的署名要求仍需满足，见 base.css .tm-map-attrib） -->
+          <a class="tm-map-attrib tm-map-attrib--tl" href="https://www.openstreetmap.org/copyright"
+             target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+
           <!-- 足迹概览（**整块默认收起**）
                地图左下角只留一个小胶囊「足迹概览」，点它才把整张卡展开。
                卡片内部沿用原设计（内边距 13/16px、数字 28px、148px 最小宽度、
@@ -291,6 +296,13 @@ if (location.protocol === 'file:') {
       <div class="modal__mapblur" id="tm-modal-mapblur"></div>
       <div class="modal__mapedge"></div>
       <div class="modal__mapbadge" id="tm-modal-badge"></div>
+      <!-- 照片点位显隐：把该地点带 GPS 的照片聚成缩略圆点铺在地图上，
+           照片多时地图才有"我在这拍过什么"的信息量；点了可以收起来 -->
+      <button class="modal__mapdots" id="tm-modal-dots" type="button" hidden></button>
+      <!-- 底图署名：锚在 .modal__mapwrap 上（而不是随 .modal__map 上下位移），
+           这样地图区滚动收缩时它始终贴住可见区域底边 -->
+      <a class="tm-map-attrib tm-map-attrib--br" href="https://www.openstreetmap.org/copyright"
+         target="_blank" rel="noopener">© OpenStreetMap contributors</a>
       <div class="modal__noloc" id="tm-modal-noloc" hidden>
         <div class="modal__noloc-ico">📍</div>
         <p class="modal__noloc-title">这个心愿还没有定位</p>
@@ -302,20 +314,26 @@ if (location.protocol === 'file:') {
       <!-- 固定高度占位：高度恒为 --mw-max，保证内容总高在地图收缩过程中不变 -->
       <div class="modal__pad" aria-hidden="true"></div>
       <div class="modal__head">
+        <!-- 全屏信息卡（故事卡）三段新增元素：封面 / 三栏指标 / 一句话备注。
+             常规弹窗里三者都 display:none，head 仍是原来的 dot + meta + actions -->
+        <img class="modal__cover" id="tm-modal-cover" alt="" hidden />
         <span class="typeDot" id="tm-modal-dot"></span>
         <div class="modal__meta">
           <h3 class="modal__title" id="tm-modal-title">—</h3>
           <p class="modal__sub" id="tm-modal-sub">—</p>
         </div>
+        <div class="modal__chips" id="tm-modal-chips"></div>
+        <div class="modal__facts" id="tm-modal-facts" hidden></div>
+        <p class="modal__note" id="tm-modal-note" hidden></p>
         <div class="modal__actions">
           <button class="modal__add" id="tm-modal-addbtn" type="button" hidden>
-            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-plus"/></svg>添加媒体
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-plus"/></svg><span class="modal__bt">添加媒体</span>
           </button>
           <button class="modal__edit" id="tm-modal-edit" type="button" hidden>
-            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-edit"/></svg>编辑
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-edit"/></svg><span class="modal__bt">编辑</span>
           </button>
           <button class="modal__delete" id="tm-modal-delete" type="button" hidden>
-            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg>删除
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg><span class="modal__bt">删除</span>
           </button>
         </div>
       </div>

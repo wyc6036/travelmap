@@ -75,6 +75,39 @@ function pinElement(color, active) {
 /** 取媒体中"可全屏预览"的部分（图片 / 视频） */
 const isViewable = (m) => m.type === 'image' || m.type === 'video';
 
+/* =========================================================
+ * 时间轴分组用的纯函数
+ * ---------------------------------------------------------
+ * 日期来源是媒体的 `takenAt`（EXIF 拍摄时间）。旧数据里可能存成
+ * "2016:02:02 10:00:00" 这种 EXIF 冒号格式，`new Date()` 解析不了，
+ * 所以先规整成 ISO 再解析；解析失败就当"没有拍摄时间"处理。
+ * ========================================================= */
+const WEEK_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DAY_MS = 86400000;
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function parseTakenAt(s) {
+  if (!s) return null;
+  const iso = String(s).replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** 本地日期键 YYYY-MM-DD（用本地时间，跨时区不会把凌晨的照片算到前一天） */
+function dayKeyOf(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** 出现次数最多的值（拍摄设备用；空值不参与） */
+function mostCommon(list) {
+  const stat = new Map();
+  list.filter(Boolean).forEach((v) => stat.set(v, (stat.get(v) || 0) + 1));
+  let best = '';
+  let max = 0;
+  stat.forEach((n, v) => { if (n > max) { max = n; best = v; } });
+  return best;
+}
+
 /**
  * 点击目标是否落在"点哪儿关窗口"的区域上（遮罩 / 关闭按钮，标了 data-close="1"）。
  *
@@ -100,6 +133,11 @@ export function createDetailModal({
   const tabsEl = document.getElementById('tm-modal-tabs');
   const contentEl = document.getElementById('tm-modal-content');
   const badgeEl = document.getElementById('tm-modal-badge');
+  const chipsEl = document.getElementById('tm-modal-chips');
+  const coverEl = document.getElementById('tm-modal-cover');
+  const factsEl = document.getElementById('tm-modal-facts');
+  const noteEl = document.getElementById('tm-modal-note');
+  const dotsEl = document.getElementById('tm-modal-dots');
   const noLocEl = document.getElementById('tm-modal-noloc');
   const closeBtn = document.getElementById('tm-modal-close');
   const editBtn = document.getElementById('tm-modal-edit');
@@ -129,6 +167,15 @@ export function createDetailModal({
   let lastFocus = null;
   /** 全屏分栏视图是否开启（点右上角 ⤢ 切换） */
   let fsActive = false;
+
+  /** 全屏左栏第三段：精选照片条（只在 enterFs 时创建，exitFs 时销毁） */
+  let pickedEl = null;
+  /** 地图上的照片点位标记（与 location 图钉分开管理：一个是"地点"，一个是"拍摄点"） */
+  let photoMarkers = [];
+  /** 照片点位是否显示（默认开；用户点了胶囊就记住，跨地点保持） */
+  let photoDotsOn = true;
+  /** 当前地点的带 GPS 照片总数（胶囊文案用，与"画了几个簇"是两个数） */
+  let photoDotTotal = 0;
 
   /* 行程模式里被点选的站点（place id，null = 没选）。
      选中后：下面的媒体只显示那一站的，地图上其余打点压灰。点地图空白恢复。 */
@@ -251,6 +298,128 @@ export function createDetailModal({
     // 让小地图略微下移目标点，给图钉留出视觉空间
     detailMap.easeTo({
       center: [place.lng, place.lat], duration: 0,
+    });
+  }
+
+  /* =========================================================
+   * 照片点位图层
+   * ---------------------------------------------------------
+   * 只有 1 个图钉的地图看不出"我在这儿拍过什么"，信息密度接近 0。
+   * 这里把该地点**带 GPS 的照片**聚成 30px 缩略圆点铺到地图上：
+   *   · 按经纬度取 2 位小数聚合（约 1km 一格），避免 70 张照片在同一处
+   *     叠出 70 个圆点；
+   *   · 最多 10 个点，超出部分只在胶囊上体现数量；
+   *   · 右下角胶囊一键收/显，状态跨地点保留（photoDotsOn）。
+   * 与 renderDetailMarkers（地点图钉）互不干扰，两套标记分开存。
+   * ========================================================= */
+  function photoPointsOf(view) {
+    if (!view || view.kind !== 'place') return { points: [], total: 0 };
+    const seen = new Map();
+    let total = 0;
+    for (const m of view.media || []) {
+      if (!isViewable(m)) continue;
+      const lat = Number(m.gpsLat);
+      const lng = Number(m.gpsLng);
+      if (!lat || !lng) continue;                 // 0/缺失 = 没有 GPS
+      total += 1;
+      const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;   // 约 1km 一格
+      if (seen.has(key)) continue;
+      seen.set(key, { lat, lng, item: m });
+    }
+    return { points: [...seen.values()].slice(0, 24), total };
+  }
+
+  function clearPhotoMarkers() {
+    photoMarkers.forEach((m) => { try { m.remove(); } catch (_) { /* 忽略 */ } });
+    photoMarkers = [];
+  }
+
+  function updateDotsChip(count) {
+    if (!dotsEl) return;
+    photoDotTotal = count;
+    dotsEl.hidden = count < 1;
+    dotsEl.classList.toggle('is-off', !photoDotsOn);
+    dotsEl.setAttribute('aria-pressed', String(photoDotsOn));
+    dotsEl.textContent = `${count} 张照片`;
+  }
+
+  function renderPhotoMarkers(view) {
+    clearPhotoMarkers();
+    /* 点位图层只在全屏地图卡里出现：常规弹窗的地图只有 ~320px 高、还跟着滚动收缩，
+       而地点的标记坐标往往和实际拍摄点差几十公里 —— 在那个尺寸里点位多半落在
+       视野外，留着胶囊反而写着"69 张照片"却一个点都看不见。 */
+    if (!fsActive) { updateDotsChip(0); return; }
+    const { points: pts, total } = photoPointsOf(view);
+    if (!pts.length || !detailMap) { updateDotsChip(0); return; }
+
+    /* 屏幕空间合并：同一地点的一堆照片往往挤在几百米内，30px 的圆点会叠成一坨糊。
+       按当前投影把距离 < 44px 的点并成一个"簇"，簇的右下角标数量。
+       ⚠️ 合并结果是一次性快照：用户手动缩放后簇不会重新分裂，但徽标上的数量是诚实的。 */
+    const clusters = [];
+    pts.forEach((p) => {
+      let pt;
+      try { pt = detailMap.project([p.lng, p.lat]); } catch (_) { return; }
+      if (!pt) return;
+      const hit = clusters.find((c) => Math.hypot(c.x - pt.x, c.y - pt.y) < 44);
+      if (hit) { hit.items.push(p); return; }
+      clusters.push({ x: pt.x, y: pt.y, items: [p] });
+    });
+
+    const list = (view.media || []).filter(isViewable);
+    clusters.slice(0, 8).forEach((c) => {
+      const first = c.items[0];
+      const lat = c.items.reduce((s, p) => s + p.lat, 0) / c.items.length;
+      const lng = c.items.reduce((s, p) => s + p.lng, 0) / c.items.length;
+
+      const el = document.createElement('div');
+      el.className = 'phpin';
+      const thumb = first.item.thumb_url || first.item.url || first.item.poster || '';
+      el.title = c.items.length > 1 ? `${c.items.length} 个拍摄点` : (first.item.caption || '查看这张照片');
+      el.innerHTML = `<img src="${escapeHtml(thumb)}" alt="" referrerpolicy="no-referrer" loading="lazy" />`
+        + (c.items.length > 1 ? `<span class="phpin__n">${c.items.length}</span>` : '');
+      const img = el.querySelector('img');
+      img.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; }, { once: true });
+
+      el.addEventListener('click', () => {
+        const i = list.indexOf(first.item);
+        if (i >= 0) openLightbox(list, i);
+      });
+      el.style.display = photoDotsOn ? '' : 'none';
+      const mk = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([lng, lat])
+        .addTo(detailMap);
+      photoMarkers.push(mk);
+    });
+    updateDotsChip(total);
+
+    /* 全屏地图卡又高又窄，而地点的标记坐标往往是"城市级"的（黄龙的标记点离实际
+       拍摄点 20 多公里），只按地点居中会把点位整个挤出可视区。
+       于是全屏态重新取景：
+         · 地点离拍摄点 ≤5km → 两者一起框（地点图钉 + 点位簇同屏，最理想的构图）；
+         · 更远（地标太粗） → 只框拍摄点，让"我在这拍过什么"占满画面；
+         · 跨度 >0.75°（约 80km） → 不折腾，保持地点居中的原有取景。 */
+    if (!Number.isFinite(view.ref?.lng) || !Number.isFinite(view.ref?.lat)) return;
+    const cLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+    const cLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+    const nearPlace = distanceKm(view.ref.lng, view.ref.lat, cLng, cLat) <= 5;
+    const lngs = nearPlace ? [...pts.map((p) => p.lng), view.ref.lng] : pts.map((p) => p.lng);
+    const lats = nearPlace ? [...pts.map((p) => p.lat), view.ref.lat] : pts.map((p) => p.lat);
+    const dx = Math.max(...lngs) - Math.min(...lngs);
+    const dy = Math.max(...lats) - Math.min(...lats);
+    if (dx > 0.75 || dy > 0.75) return;
+    if (dx < 1e-4 && dy < 1e-4) {
+      // 所有点几乎重合：fitBounds 会退化成"无限放大"，直接给一个街区级视角
+      detailMap.jumpTo({ center: [cLng, cLat], zoom: CONFIG.detailMap.zoom + 1 });
+      return;
+    }
+    const b = new maplibregl.LngLatBounds(
+      [Math.min(...lngs), Math.min(...lats)],
+      [Math.max(...lngs), Math.max(...lats)],
+    );
+    requestAnimationFrame(() => {
+      try {
+        detailMap.fitBounds(b, { padding: 48, maxZoom: CONFIG.detailMap.zoom + 2, duration: 0 });
+      } catch (_) { /* 地图已销毁 */ }
     });
   }
 
@@ -549,9 +718,124 @@ export function createDetailModal({
     nameEl.focus();
   }
 
+  /**
+   * 把媒体按**拍摄日**分组，返回已排好序的分组。
+   * 排序：有日期的按时间升序（时间轴自上而下 = 早 → 晚），无日期的一组沉底。
+   * ⚠️ 调用方传进来的 list 必须已经按同一顺序排好 —— mediaCell 的序号
+   *   与 openLightbox 的索引用的是"在 list 里的下标"，两边顺序必须一致。
+   */
+  function groupByDay(list) {
+    const map = new Map();
+    list.forEach((item, idx) => {
+      const d = parseTakenAt(item.takenAt);
+      const key = d ? dayKeyOf(d) : '';
+      if (!map.has(key)) map.set(key, { key, date: d, items: [] });
+      map.get(key).items.push({ item, idx });
+    });
+    const groups = [...map.values()].sort((a, b) => {
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return a.date - b.date;
+    });
+    groups.forEach((g) => {
+      if (!g.date) { g.label = '未标注日期'; g.wd = ''; return; }
+      g.label = `${pad2(g.date.getMonth() + 1)}.${pad2(g.date.getDate())}`;
+      g.wd = WEEK_CN[g.date.getDay()];
+    });
+    return groups;
+  }
+
+  /**
+   * 右栏时间轴：范围摘要 + 逐日分组（左轴 + 日期头 + 当日网格）。
+   * 颗粒度 = 天；跨天空档 ≥2 天时给一枚「间隔 N 天」，避免误读成连续行程。
+   */
+  function buildTimeline(list) {
+    const tl = document.createElement('div');
+    tl.className = 'tl';
+    const groups = groupByDay(list);
+    if (!groups.length) return tl;
+
+    const dated = groups.filter((g) => g.date);
+    if (dated.length >= 1) {
+      const a = dated[0].date;
+      const b = dated[dated.length - 1].date;
+      const span = Math.round((b - a) / DAY_MS) + 1;
+      /* 数量只算"有拍摄时间"的那些：未标注日期的组不属于这条时间轴 */
+      const datedCount = dated.reduce((sum, g) => sum + g.items.length, 0);
+      const range = document.createElement('div');
+      range.className = 'tl__range';
+      range.textContent = span === 1
+        ? `${formatDateDot(dayKeyOf(a))} · 当天 · ${datedCount} 项`
+        : `${formatDateDot(dayKeyOf(a))} – ${formatDateDot(dayKeyOf(b))} · ${span} 天 · ${datedCount} 项`;
+      tl.append(range);
+    }
+
+    let prevDate = null;
+    groups.forEach((g) => {
+      const grp = document.createElement('div');
+      grp.className = 'tl__group';
+      grp.dataset.day = g.key || 'undated';
+
+      const rail = document.createElement('div');
+      rail.className = 'tl__rail';
+      rail.innerHTML = '<span class="tl__dot"></span>';
+
+      const day = document.createElement('div');
+      day.className = 'tl__day';
+
+      const head = document.createElement('div');
+      head.className = 'tl__head';
+      let gapHtml = '';
+      if (g.date && prevDate) {
+        const gap = Math.round((g.date - prevDate) / DAY_MS);
+        if (gap >= 2) gapHtml = `<span class="tl__gap">间隔 ${gap - 1} 天</span>`;
+      }
+      head.innerHTML = `<b class="tl__date">${g.label}</b>`
+        + (g.wd ? `<span class="tl__wd">${g.wd}</span>` : '')
+        + gapHtml
+        + `<span class="tl__n">${g.items.length} 张</span>`;
+
+      const grid = document.createElement('div');
+      grid.className = 'mgrid';
+      g.items.forEach(({ item, idx }) => grid.append(mediaCell(item, list, idx)));
+
+      day.append(head, grid);
+      grp.append(rail, day);
+      tl.append(grp);
+      if (g.date) prevDate = g.date;
+    });
+
+    return tl;
+  }
+
+  /**
+   * 空状态：没有可展示的媒体时，右栏原本是一片纯白（看着像加载失败）。
+   * 单地点给「添加媒体」入口，行程只说明"这条行程还没有媒体"。
+   */
+  function renderEmptyState() {
+    const isText = activeTab === 'text';
+    const wrap = document.createElement('div');
+    wrap.className = 'modal__empty';
+    wrap.innerHTML = `<div class="modal__empty-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><use href="${isText ? '#i-note' : '#i-image'}"/></svg></div>`
+      + `<p class="modal__empty-title">${isText ? '还没有笔记' : '这里还没有照片'}</p>`
+      + `<p class="modal__empty-sub">${isText ? '写下这一站的片段，它会出现在时间轴里。' : '把这一站的画面留下来，照片会按拍摄日期自动排进时间轴。'}</p>`;
+
+    if (current?.kind === 'place') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'modal__empty-btn';
+      btn.textContent = '+ 添加媒体';
+      btn.addEventListener('click', openUploadModal);
+      wrap.append(btn);
+    }
+    return wrap;
+  }
+
   function renderContent(view) {
     contentEl.innerHTML = '';
     const items = view.media.filter((m) => m.type === activeTab);
+
+    if (!items.length) { contentEl.append(renderEmptyState()); return; }
 
     if (activeTab === 'text') {
       const wrap = document.createElement('div');
@@ -572,15 +856,17 @@ export function createDetailModal({
       return;
     }
 
-    const list = items.filter(isViewable);
-    const grid = document.createElement('div');
-    grid.className = 'mgrid';
-    list.forEach((item, i) => {
-      // 瀑布流（CSS columns）下不再做"首图占两格"的特殊处理：
-      // 不等高的卡片本就交错，强行拉宽反而会破坏列平衡。
-      grid.append(mediaCell(item, list, i));
+    /* 时间轴要"自上而下 = 早→晚"，所以先按拍摄时间把 list 整体排好，
+       分组与序号都基于这份有序 list（灯箱左右切换的顺序也随之一致）。 */
+    const ordered = items.filter(isViewable).slice().sort((a, b) => {
+      const da = parseTakenAt(a.takenAt);
+      const db = parseTakenAt(b.takenAt);
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return da - db;
     });
-    contentEl.append(grid);
+    contentEl.append(buildTimeline(ordered));
   }
 
   /* =========================================================
@@ -669,7 +955,10 @@ export function createDetailModal({
           attributionControl: false,
           dragRotate: false, pitchWithRotate: false, scrollZoom: true, trackResize: false,
         });
-        map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+        /* 署名：不用 AttributionControl（会渲染成圆形 ⓘ），改为静态文字链接常显。 */
+        el.insertAdjacentHTML('beforeend',
+          '<a class="tm-map-attrib tm-map-attrib--br" href="https://www.openstreetmap.org/copyright"'
+          + ' target="_blank" rel="noopener">© OpenStreetMap contributors</a>');
         // 缩放按钮（+/-）：让用户在灯箱迷你地图上手动调节缩放级别（关掉指南针与复位，只留放大/缩小）。
         // 滚轮缩放也已开启（scrollZoom:true），在地图上滚动滚轮即可缩放；按钮与滚轮两种方式并存。
         map.addControl(new maplibregl.NavigationControl({ showZoom: true, showCompass: false, showReset: false }), 'top-right');
@@ -865,6 +1154,173 @@ export function createDetailModal({
     return pool.find((x) => x.id === id) || view.ref;
   }
 
+  /**
+   * 全屏分栏下信息卡里的统计 chips（常规模式整行 display:none，只服务全屏卡）。
+   * 地图左下角的坐标徽标在全屏态隐藏，信息并入这里：
+   * 类型 · 国家（行程为站点数）· 坐标 · 照片数。
+   */
+  function renderFsChips(view) {
+    if (!chipsEl) return;
+    chipsEl.textContent = '';
+    const add = (text, kind) => {
+      const c = document.createElement('span');
+      c.className = 'modal__chip' + (kind ? ' modal__chip--kind' : '');
+      c.textContent = text;
+      chipsEl.appendChild(c);
+    };
+    if (view.kind === 'trip') {
+      add('行程', true);
+      add(`${view.places.length} 个地点`);
+    } else {
+      add(view.ref.isWishNew ? '心愿地点' : '到访记录', true);
+      if (view.ref.countryZh) add(view.ref.countryZh);
+      const { lng, lat } = view.ref;
+      if (Number.isFinite(lng) && Number.isFinite(lat)) add(`${lng.toFixed(2)}, ${lat.toFixed(2)}`);
+    }
+    /* mediaCount 是 { image, video, text, total }（data.js 的形状，不是数字） */
+    const mc = view.mediaCount || {};
+    const total = mc.total || 0;
+    if (total <= 0) add('暂无资料');
+    else add(mc.video ? `${total} 项资料` : `${total} 张照片`);
+  }
+
+  /**
+   * 全屏故事卡：封面 / 三栏指标 / 一句话备注。
+   * 三块在常规弹窗里是 display:none（见 modal.css），这里只负责填内容 + 控制 hidden，
+   * 所以常规态的头部布局一点都不受影响。
+   *
+   * 指标口径（全部来自已有数据，不需要新字段）：
+   *   单地点 → 首次到访（min takenAt，缺失时退回地点 date）· 最近一次（max）· 拍摄设备（众数）
+   *   行程   → 起止（formatDateRange）· 跨度天数 · 站点数
+   */
+  function renderFsStory(view) {
+    const media = view.media || [];
+    const dated = media.map((m) => parseTakenAt(m.takenAt)).filter(Boolean).sort((a, b) => a - b);
+    const ref = view.ref || {};
+
+    /* ---- 封面：第一张能出图的照片（缩略图挂了就退回占位图，不整块消失） ---- */
+    const cover = media.find((m) => m.type === 'image' && (m.thumb_url || m.url));
+    if (coverEl) {
+      if (cover) {
+        coverEl.hidden = false;
+        coverEl.src = cover.thumb_url || cover.url;
+        coverEl.onerror = () => { coverEl.src = './assets/sidebar-art.svg'; };
+      } else {
+        coverEl.hidden = true;
+        coverEl.removeAttribute('src');
+      }
+    }
+    /* 有封面时标题区靠封面打头，类型圆点就不再单摆一颗（类型信息 chips 里已经有） */
+    headEl.classList.toggle('has-cover', !!cover);
+
+    /* ---- 三栏指标 ---- */
+    if (factsEl) {
+      const cells = [];
+      const addFact = (k, v) => { if (v) cells.push([k, v]); };
+      if (view.kind === 'trip') {
+        const start = ref.startDate || ref.date || (dated[0] ? dayKeyOf(dated[0]) : '');
+        const end = ref.endDate || (dated.length ? dayKeyOf(dated[dated.length - 1]) : start);
+        addFact('行程日期', formatDateRange(start, end) || '—');
+        addFact('跨度', dated.length ? `${Math.round((dated[dated.length - 1] - dated[0]) / DAY_MS) + 1} 天` : '—');
+        addFact('站点', `${(view.places || []).length} 个`);
+      } else {
+        const firstVisit = dated.length ? formatDateDot(dayKeyOf(dated[0])) : formatDateDot(ref.date);
+        const lastVisit = dated.length
+          ? formatDateDot(dayKeyOf(dated[dated.length - 1]))
+          : formatDateDot(ref.endDate || ref.date);
+        addFact('首次到访', firstVisit);
+        /* 只有一天时"最近一次"和首次重复，宁可不显示，把位置让给资料数 */
+        addFact('最近一次', lastVisit && lastVisit !== firstVisit ? lastVisit : '');
+        const device = mostCommon(media.map((m) => [m.cameraMake, m.cameraModel].filter(Boolean).join(' ')));
+        addFact('拍摄设备', device);
+        addFact('资料', media.length ? `${media.length} 项` : '');
+      }
+      factsEl.textContent = '';
+      /* 只有 2 条时按两栏排（三栏会空出右侧 1/3，看着像缺一块） */
+      factsEl.dataset.cols = String(Math.min(cells.length, 3));
+      cells.slice(0, 3).forEach(([k, v]) => {
+        const cell = document.createElement('div');
+        cell.className = 'modal__fact';
+        cell.innerHTML = `<div class="modal__fact-k">${escapeHtml(k)}</div>`
+          + `<div class="modal__fact-v" title="${escapeHtml(v)}">${escapeHtml(v)}</div>`;
+        factsEl.append(cell);
+      });
+      /* 只有 1 条指标时三栏会空掉两格，不如整行不给 */
+      factsEl.hidden = cells.length < 2;
+    }
+
+    /* ---- 一句话备注：地点 desc → 没有就用最近一张照片的备注 ---- */
+    if (noteEl) {
+      const desc = String(ref.desc || '').trim()
+        || (media
+          .filter((m) => m.remark)
+          .sort((a, b) => (parseTakenAt(b.takenAt) || 0) - (parseTakenAt(a.takenAt) || 0))[0]?.remark || '').trim();
+      noteEl.hidden = !desc;
+      noteEl.textContent = desc;
+    }
+  }
+
+  /**
+   * 左栏「精选照片」条：均匀抽 3 张（首图 + 两个等距点），第 4 格是「+N」。
+   * 均匀抽取而不是直接取前三张——同一地点的前几张往往是同一处景，
+   * 等距采样更容易凑出"不同的样子"。
+   */
+  function renderPicked(view) {
+    if (!pickedEl) return;
+    pickedEl.textContent = '';
+    const imgs = (view.media || []).filter((m) => m.type === 'image' && (m.thumb_url || m.url));
+    if (imgs.length < 2) { pickedEl.hidden = true; return; }
+    pickedEl.hidden = false;
+
+    const picks = [];
+    const n = Math.min(3, imgs.length);
+    for (let i = 0; i < n; i += 1) {
+      const idx = n === 1 ? 0 : Math.round((i * (imgs.length - 1)) / (n - 1));
+      if (!picks.includes(idx)) picks.push(idx);
+    }
+
+    const head = document.createElement('div');
+    head.className = 'modal__picked-head';
+    head.innerHTML = `<span>精选照片 · ${imgs.length}</span>`
+      + '<button type="button" class="modal__picked-all">查看全部</button>';
+    const row = document.createElement('div');
+    row.className = 'modal__picked-row';
+
+    picks.forEach((idx) => {
+      const m = imgs[idx];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'modal__picked-item';
+      btn.title = m.caption || '查看大图';
+      btn.innerHTML = `<img src="${escapeHtml(m.thumb_url || m.url)}" alt="" referrerpolicy="no-referrer" loading="lazy" />`;
+      const th = btn.querySelector('img');
+      th.addEventListener('error', () => { th.src = './assets/sidebar-art.svg'; }, { once: true });
+      btn.addEventListener('click', () => openLightbox(imgs, idx));
+      row.append(btn);
+    });
+
+    /* 补满 4 格：要么「+N」，要么留空（不硬塞重复图） */
+    const rest = imgs.length - picks.length;
+    if (rest > 0) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'modal__picked-item modal__picked-item--more';
+      more.textContent = `+${rest}`;
+      more.title = '查看全部照片';
+      more.addEventListener('click', () => openLightbox(imgs, picks[picks.length - 1] ?? 0));
+      row.append(more);
+    }
+    while (row.children.length < 4) {
+      const blank = document.createElement('div');
+      blank.className = 'modal__picked-item modal__picked-item--more';
+      blank.style.visibility = 'hidden';
+      row.append(blank);
+    }
+
+    pickedEl.append(head, row);
+    head.querySelector('.modal__picked-all')?.addEventListener('click', () => openLightbox(imgs, 0));
+  }
+
   /** 打开后的公共挂载流程。地点与行程只有"上半部地图怎么画"不同。 */
   function mount(view) {
     // 仅在"从关闭态重新打开"时清掉可能残留的全屏态；
@@ -880,6 +1336,9 @@ export function createDetailModal({
     dotEl.style.background = view.color;
     subEl.textContent = view.sub;
     badgeEl.textContent = view.badge;
+    renderFsChips(view);
+    renderFsStory(view);          // 全屏故事卡（常规态由 CSS 隐藏）
+    renderPicked(view);           // 全屏精选条（元素只在 enterFs 时存在）
     // 「编辑」对单地点与行程都有效（行程走编辑行程弹窗，增删足迹点）
     if (editBtn) editBtn.hidden = (view.kind !== 'place' && view.kind !== 'trip');
     // 「删除」同样仅对单地点有效
@@ -916,6 +1375,8 @@ export function createDetailModal({
            把站点所在国家的包围盒一起交给取景，让"走一遍"带上地理上下文。 */
         showNoLocHint(false);
         clearDetailMarkers();
+        clearPhotoMarkers();
+        updateDotsChip(0);
         routeAnim.play(view.places, { contextBounds: contextBoundsFor(view.places) });
       } else {
         routeAnim.stop();                 // 从行程切到地点：动画与折线一并收掉
@@ -928,6 +1389,7 @@ export function createDetailModal({
           detailMap.jumpTo({ center: [20, 20], zoom: 1.2 });
           showNoLocHint(true);
         }
+        renderPhotoMarkers(view);          // 照片点位与"地点是否已定位"无关，单独一套
       }
       detailMap.resize();
     });
@@ -959,6 +1421,7 @@ export function createDetailModal({
       modal.classList.remove('is-closing');
       document.body.classList.remove('is-modal-open');
       exitFs();                   // 关闭时还原全屏分栏的 DOM，确保下次打开是常规布局
+      clearPhotoMarkers();        // 照片点位不跨"关闭"留存（下次 mount 会重新算）
       current = null;
       /* 弹窗完全关闭后通知外部（主图用它在 closeLightbox 之后把激活图钉
          恢复成普通大小——见 main.js 的 onClosed → markers.setActive(null)） */
@@ -972,11 +1435,13 @@ export function createDetailModal({
   }
 
   /* =========================================================
-   * 全屏视图（左右分栏）
+   * 全屏视图（左右分栏 · 双卡布局）
    * ---------------------------------------------------------
    * 右上角 ⤢ 按钮在「常规」与「全屏分栏」两种布局间切换：
    *   · 常规：地图在上、媒体在下（沿用既有滚动收缩逻辑）。
-   *   · 全屏：左栏 = 地图 + 地点名称/日期等信息，右栏 = 多媒体网格。
+   *   · 全屏：左栏 = 纸色底上的双卡（上 = 地图卡，下 = 名称/统计 chips/操作
+   *     信息卡），右栏 = 多媒体网格。布局全部由 modal.css 的
+   *     .modal--fullscreen 规则完成，这里只负责搬 DOM 与地图 resize。
    * 切换把 #tm-modal-mapwrap 与 .modal__head 临时搬进一个 .modal__left
    * 容器、并给 .modal 加 .modal--fullscreen；退出时把 DOM 还原，
    * 保证常规模式完全不受影响（地图实例本身不重建，只 resize）。
@@ -996,6 +1461,11 @@ export function createDetailModal({
     left.className = 'modal__left';
     panel.insertBefore(left, bodyEl);
     left.append(mapwrapEl, headEl);
+    /* 第三段：精选照片条。只在全屏左栏存在，exitFs 时连同 .modal__left 一起销毁 */
+    pickedEl = document.createElement('div');
+    pickedEl.className = 'modal__picked';
+    left.append(pickedEl);
+    if (current) { renderFsStory(current); renderPicked(current); }
     padEl.style.display = 'none';
     // 全屏下开启地图缩放：滚轮缩放 + 放大/缩小按钮（top-left，避开右上角弹窗按钮与右下角署名）
     if (detailMap) {
@@ -1009,8 +1479,12 @@ export function createDetailModal({
     setFsIcon(true);
     if (fsBtn) { fsBtn.setAttribute('aria-pressed', 'true'); fsBtn.setAttribute('aria-label', '退出全屏视图'); }
     bodyEl.scrollTop = 0;
-    // 布局切换后容器尺寸变了，地图必须 resize 才能铺满左栏
-    requestAnimationFrame(() => { try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ } });
+    // 布局切换后容器尺寸变了，地图必须 resize 才能铺满左栏；
+    // 点位簇是按"投影后的屏幕距离"合并的，尺寸一变就要重算 + 重新取景
+    requestAnimationFrame(() => {
+      try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ }
+      if (current) renderPhotoMarkers(current);
+    });
   }
 
   function exitFs() {
@@ -1029,12 +1503,24 @@ export function createDetailModal({
     panel.insertBefore(mapwrapEl, bodyEl);
     const left = panel.querySelector('.modal__left');
     if (left) left.remove();
+    pickedEl = null;              // 已随 .modal__left 一起从 DOM 移除
     padEl.style.display = '';
     setFsIcon(false);
     if (fsBtn) { fsBtn.setAttribute('aria-pressed', 'false'); fsBtn.setAttribute('aria-label', '全屏视图'); }
     bodyEl.scrollTop = 0;
     // 仅在可见时 resize（隐藏态下容器为 0，resize 会报错且无意义）
-    if (!modal.hidden) requestAnimationFrame(() => { try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ } });
+    if (!modal.hidden) {
+      requestAnimationFrame(() => {
+        try { if (detailMap) detailMap.resize(); } catch (_) { /* 忽略 */ }
+        if (current) {
+          renderPhotoMarkers(current);      // 全屏专属图层：退出时清空，胶囊跟着隐藏
+          /* 全屏里被 fitBounds 拉远过，常规态要复位成"地点居中"的原有取景 */
+          if (current.kind === 'place' && Number.isFinite(current.ref?.lng) && Number.isFinite(current.ref?.lat)) {
+            detailMap.jumpTo({ center: [current.ref.lng, current.ref.lat], zoom: CONFIG.detailMap.zoom });
+          }
+        }
+      });
+    }
   }
 
   function toggleFs() { if (fsActive) exitFs(); else enterFs(); }
@@ -1062,6 +1548,17 @@ export function createDetailModal({
   bodyEl.addEventListener('scroll', onScroll, { passive: true });
   closeBtn.addEventListener('click', close);
   fsBtn?.addEventListener('click', toggleFs);
+
+  /* 照片点位显隐：只切每张缩略图自身的 display，Markers 保留在图上
+     （反复 remove/add 会触发重新布局，且点位缩放级别一变就要重算） */
+  dotsEl?.addEventListener('click', () => {
+    photoDotsOn = !photoDotsOn;
+    photoMarkers.forEach((mk) => {
+      const el = mk.getElement?.();
+      if (el) el.style.display = photoDotsOn ? '' : 'none';
+    });
+    updateDotsChip(photoDotTotal);
+  });
 
   /* 详情页：头部「添加媒体」按钮（仅单地点模式可用，可见性由 mount 控制） */
   $('tm-modal-addbtn')?.addEventListener('click', openUploadModal);
@@ -1171,6 +1668,9 @@ export function createDetailModal({
       titleEl.textContent = current.name;
       subEl.textContent = current.sub;
       badgeEl.textContent = current.badge;
+      renderFsChips(current);
+      renderFsStory(current);
+      renderPicked(current);
       rerenderContent();                       // 含 Tab 计数与筛选徽标
 
       if (detailMap) applyVisitedCountries(detailMap, getVisited(), DETAIL_FILL);
@@ -1185,6 +1685,7 @@ export function createDetailModal({
         }
       } else {
         renderDetailMarkers(ref);      // 邻居图钉可能多了/少了
+        renderPhotoMarkers(current);   // 新上传的照片可能带来新的 GPS 点位
       }
     },
   };

@@ -189,9 +189,9 @@ export function createMap(container, overrides = {}) {
     document.getElementById('tm-map-retry')?.addEventListener('click', () => retryNow(map));
   }
 
-  /* 归属信息：放左上角（左下角被"足迹概览"卡片占用，右下角是图例）。
-     保持 compact 收起态，既不遮挡内容，也满足底图署名要求。 */
-  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-left');
+  /* 底图署名不在这里挂控件：MapLibre 的 AttributionControl 会渲染成圆形 ⓘ 按钮，
+     与地图卡视觉冲突。署名改为 index.html 里的静态文字链接 .tm-map-attrib
+     （OSM / OpenFreeMap 要求可见署名，所以是"换形式"而非"去掉"）。 */
   /* 瓦片/样式报错：区分「style 拉取失败」与「瓦片错误」 */
   map.on('error', (e) => {
     const st = styleState.get(map);

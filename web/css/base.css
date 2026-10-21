@@ -60,39 +60,27 @@ img, video { display: block; max-width: 100%; }
 /* MapLibre 自带控件外观对齐本项目 */
 .maplibregl-map { font-family: var(--font-sans); }
 
-/* 归属信息：放在地图卡左上角，默认收起成一个小 ⓘ，悬停/聚焦才展开，
-   既不遮挡地图内容，也始终满足底图署名要求。 */
-.maplibregl-ctrl-top-left { margin: 6px 0 0 6px; }
-.maplibregl-ctrl-attrib {
-  background: rgba(255, 255, 255, .72) !important;
-  border-radius: var(--r-pill) !important;
-  font-size: 10px !important;
-  color: var(--ink-3) !important;
+/* 底图署名（全项目三处地图共用：地图页主图 / 详情弹窗地图 / 灯箱迷你地图）
+   2026-10-21：MapLibre 的 AttributionControl 会渲染成圆形 ⓘ 按钮，与地图卡视觉冲突，
+   已从三个地图实例上全部移除，改为常显的静态文字链接——署名要求（OSM 数据 +
+   OpenFreeMap 底图）依旧满足，只是不再需要"点开才看见"这层交互。
+   定位由修饰类给：--tl 左上（主图，另三个角被概览卡/图例/缩放组占用）、
+   --br 右下（详情地图卡与灯箱迷你地图）。z-index 2 = 压在画布与模糊层之上、
+   但低于 .modal__noloc 的空状态遮罩（3），无定位时署名跟着遮罩一起被盖住。 */
+.tm-map-attrib {
+  position: absolute;
+  z-index: 2;
+  padding: 3px 7px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, .72);
+  border-radius: var(--r-pill);
   box-shadow: var(--sh-1);
-  padding: 0 !important;
+  transition: color .15s ease, background .15s ease;
 }
-.maplibregl-ctrl-attrib a { color: var(--ink-2) !important; }
-/* ⚠️ 这里三件事必须一起写，少一个图标就会错乱：
-   MapLibre 给 .maplibregl-ctrl-attrib-button 的只有 background-image（内联 data-URI 的 ⓘ）
-   + 一个 50% 的尺寸，**没有 background-repeat**，所以计算值仍是默认的 `repeat`。
-   我们把它压到 22px 圆钮、background-size 又设成 14px，于是这个 ⓘ 会在钮里平铺出 2×2，
-   再被 border-radius:50% 一裁 —— 看到的就是"几个残缺图形挤在一个圆里"的错乱图标。
-   所以必须显式补齐 no-repeat + 居中。 */
-.maplibregl-ctrl-attrib-button {
-  opacity: .5;
-  width: 22px !important; height: 22px !important;
-  background-size: 14px 14px !important;
-  background-repeat: no-repeat !important;
-  background-position: center !important;
-  border-radius: 50% !important;
-}
-/* MapLibre v5 用 <details open> 渲染，这里强制回到"收起"态 */
-.maplibregl-ctrl-attrib.maplibregl-compact { min-height: 22px; }
-.maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-inner { display: none !important; }
-.maplibregl-ctrl-attrib.maplibregl-compact:hover .maplibregl-ctrl-attrib-inner,
-.maplibregl-ctrl-attrib.maplibregl-compact:focus-within .maplibregl-ctrl-attrib-inner {
-  display: block !important;
-  padding: 0 10px 0 22px;
-}
-.maplibregl-ctrl-attrib.maplibregl-compact:hover,
-.maplibregl-ctrl-attrib.maplibregl-compact:focus-within { padding: 3px 0 !important; }
+.tm-map-attrib:hover { color: var(--ink-1); background: rgba(255, 255, 255, .94); }
+.tm-map-attrib--tl { top: 8px; left: 8px; }
+.tm-map-attrib--br { right: 8px; bottom: 8px; }
