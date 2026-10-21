@@ -11,9 +11,8 @@
 #      → 选 Cloudflared → 起个名字（如 travelmap） → 复制给出的 token
 #   3. 在 .env 里加一行：
 #        CF_TUNNEL_TOKEN=eyJhIjoiXXXX....（很长一串）
-#   4. 叠加启动：
-#        docker compose -f docker-compose.prod.yml -f docker-compose.tunnel.yml up -d
-#      （本地构建版把第一个文件换成 docker-compose.yml）
+#   4. 叠加启动（基础文件始终是 docker-compose.yml，部署机不用加 --build）：
+#        docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 #   5. 回隧道后台 → Public Hostnames → Add：
 #        Subdomain: travel    Domain: 你的域名.com
 #        Service Type: HTTP    URL: travelmap:8080   ← 容器名，不要加 http://

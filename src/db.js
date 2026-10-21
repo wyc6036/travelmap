@@ -183,6 +183,9 @@ const stmt = {
   unassignedGps: db.prepare("SELECT id,kind,url,thumb_url,caption,taken_at,gps_lat,gps_lng FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='') AND (gps_lat<>0 OR gps_lng<>0)"),
   /* 无 GPS 的未归类媒体：需用户手动指派 */
   unassignedNoGps: db.prepare("SELECT id,kind,url,thumb_url,caption,taken_at FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='') AND gps_lat=0 AND gps_lng=0"),
+  /* 待整理照片：未归类（place_id 为空）的媒体总数，首页「待整理照片」小组件用它做头条数字。
+     只取 COUNT，不拉整行 —— 未归类的照片可能有几百张，widget 每轮渲染都读一次。 */
+  pendingMediaCount: db.prepare("SELECT COUNT(*) AS n FROM media WHERE status='ready' AND (place_id IS NULL OR place_id='')"),
   allPlacesLite: db.prepare('SELECT id,name,lng,lat FROM places'),
   assignMedia: db.prepare("UPDATE media SET place_id=? WHERE id=?"),
   /* 心愿：注解（按 place_id 索引）与自建心愿地点 */
@@ -511,6 +514,11 @@ function getUnassignedMediaWithGps() {
 /** 未归类且无 GPS 的媒体（需手动指派）。 */
 function getUnassignedNoGps() {
   return stmt.unassignedNoGps.all();
+}
+
+/** 未归类媒体的总数（含无 GPS 的），只回一个数字。 */
+function getPendingMediaCount() {
+  return stmt.pendingMediaCount.get().n;
 }
 
 /** 全部地点的轻量字段（用于「距已有地点多近就归入」的距离匹配）。 */
@@ -890,7 +898,7 @@ module.exports = {
   updateMedia, setPlaceCoverUrl, setMediaMeta, migrateMediaMeta,
   markMediaReady, markMediaError,
   getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed,
-  assignMediaToPlace, getUnassignedMediaWithGps, getUnassignedNoGps,
+  assignMediaToPlace, getUnassignedMediaWithGps, getUnassignedNoGps, getPendingMediaCount,
   getAllPlacesLite, getGeocitiesCount, importGeocities, ensureGeocitiesLoaded,
   getWishes, upsertWishAnnotation, deleteWishAnnotation, saveWishPlace, deleteWishPlace,
 };

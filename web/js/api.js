@@ -114,6 +114,9 @@ export const api = {
   /* 批量 GPS 归档：按确认后的方案落库（新建地点 / 归入已有 / 跳过） */
   gpsApply: (plan) => req('/gps/apply', json(plan || {})),
 
+  /* 待整理照片数量：未归类（不属于任何地点）的媒体条数，只回一个数字 */
+  pendingMedia: () => req('/media/pending'),
+
   /* 删除单条媒体（按 id） */
   deleteMedia: (id) => req(`/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 

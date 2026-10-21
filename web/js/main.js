@@ -462,6 +462,9 @@ async function boot() {
       app.modal?.openLightbox(list, index);
     },
     onAddPlace: () => addPlace?.open(),
+    /* 编辑已有地点（「待整理照片」组件里的「缺日期 / 缺坐标」条目点进来就走这里，
+       直接落到「编辑足迹」弹窗，而不是只读的详情弹窗） */
+    onEditPlace: (place) => addPlace?.edit(place),
     onAddTrip: () => addTrip?.open(),
     onOpenArchive: () => archive?.open(),
     /* 行程分组头的标题被点开：直接开媒体弹窗，路线动画跑在弹窗上半部的小地图里。

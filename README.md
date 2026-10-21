@@ -45,11 +45,15 @@ travelmap/
 │   ├── travelmap.db*        # 运行时生成的 SQLite 库（gitignore 忽略）
 │   └── media/               # 本地目录模式下上传的媒体（gitignore 忽略）
 ├── Dockerfile               # 两阶段构建：build 装依赖并编译原生模块 → runtime 仅留 ffmpeg；含可选 ARG NODE_BASE
-├── docker-compose.yml       # 本地构建版（build: .）：travelmap + 内置 minio 两服务；数据绑定挂载 ./data、./minio-data
-├── docker-compose.prod.yml  # 部署版：从 Docker Hub 拉取已构建镜像（无需源码）；用法见「四、从 Docker Hub 拉取部署」
-├── publish.sh               # 构建并推送镜像到 Docker Hub（多架构；国内污染时可退化为单架构，见「五、发布新版镜像」）
-├── .dockerignore            # 忽略 node_modules / *.db / data/media（seed 仍打进镜像）
-├── .env.example             # 可配置 MINIO_DATA_DIR / APP_DATA_DIR / DH_USER / ADMIN_PASSWORD 等
+├── docker-compose.yml       # 唯一编排文件：开发 `--build` 本地构建 / 部署 `pull` 拉镜像都用它；
+│                            #   travelmap + 内置 minio 两服务，配置全走 .env，数据绑定挂载 ./data、./minio-data
+├── docker-compose.tunnel.yml # 可选 overlay：额外起 cloudflared 边车，把 8080 通过 CF 隧道暴露公网
+├── publish.sh               # 唯一发布脚本：构建并推送多架构镜像；`--proxy` 切到 Mac/墙内路线（见「五」）
+├── docs/
+│   └── PUBLISHING.md        # 运维手册：发布镜像的两条路线、验证、清理、报错速查、代理分工
+├── preview/                 # 本地验收产物（Playwright 脚本 + 截图），已 gitignore，不参与构建
+├── .dockerignore            # 忽略 node_modules / *.db / data/media / minio-data（seed 仍打进镜像）
+├── .env.example             # 配置模板：APP_PORT / DH_USER / ADMIN_PASSWORD / MINIO_* / 数据目录
 └── .gitignore
 ```
 
@@ -193,8 +197,8 @@ ADMIN_PASSWORD=dev node server.js   # 访问 http://localhost:8080
 ### 2. 步骤
 
 ```bash
-# 1) 把 docker-compose.prod.yml 和 .env.example 传到目标机器
-#    （git clone 后只取这两个文件也行）
+# 1) 把 docker-compose.yml 和 .env.example 传到目标机器
+#    （git clone 后只取这两个文件也行；有源码也完全不影响，反正不会 build）
 
 # 2) 建 .env 并填好关键项
 cp .env.example .env
@@ -202,82 +206,54 @@ cp .env.example .env
 #     DH_USER=wyc6036                        # 你的 Docker Hub 用户名（决定镜像路径 docker.io/<DH_USER>/travelmap）
 #     ADMIN_PASSWORD=<你的强密码>             # 必填
 #     SESSION_SECRET=$(openssl rand -hex 32)  # 建议固定，容器重启后已登录会话不失效
+#     APP_PORT=8080                          # 想换端口改这里（如 8081）
 #     MINIO_DATA_DIR=./minio-data
 #     APP_DATA_DIR=./data
 
-# 3) 拉取并启动
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+# 3) 拉取并启动（注意：部署机不要加 --build）
+docker compose pull
+docker compose up -d
 
 # 4) 看日志确认起好
-docker compose -f docker-compose.prod.yml logs -f travelmap
+docker compose logs -f travelmap
 ```
+
+> ⚠️ **部署机千万不要用 `--build`**。`docker-compose.yml` 里同时写了 `image:` 和 `build:`（Compose 的「有则用、无则建」标准写法）：`up` 会**先尝试 pull，pull 不到才回退 build**。所以先 `pull` 就一定能拿到镜像、不会触发构建；而部署机上没有 Dockerfile，一旦 pull 失败（断网、标签写错）自动回退 build 就会报 `Dockerfile not found` —— 修好网络后重跑 `docker compose pull` 即可。默认文件名会被自动识别，`-f docker-compose.yml` 可省略不写。
 
 浏览器打开 **http://\<机器IP\>:8080**，用你设的密码登录。镜像已内置 GeoNames 城市库与 38 个种子地点，首启自动导入，数据从 0 开始。
 
 **更新 / 换机**：在新机器上重新执行 `pull && up -d` 即可（镜像已含最新代码）；回滚需保留旧版本标签。
 
-### 3. 架构说明（重要）
+### 3. 架构说明
 
-镜像目前发布了两个架构标签：
+镜像已发布为**多架构 OCI 索引（linux/amd64 + linux/arm64 合一）**，同一个标签自动匹配机器架构，**ARM 机器不用再改任何配置**：
 
-| 标签 | 架构 | 适用机器 |
-|------|------|----------|
-| `wyc6036/travelmap:latest` | **linux/amd64** | x86 / 大部分小主机（Intel / AMD） |
-| `wyc6036/travelmap:arm64` | **linux/arm64** | Mac（Apple Silicon）/ 树莓派等 ARM 机器 |
+| 标签 | 内含架构 | 适用机器 |
+|------|----------|----------|
+| `wyc6036/travelmap:latest` | amd64 + arm64 | x86 小主机 / Mac（Apple Silicon）/ 树莓派等，均可直接 `pull` |
+| `wyc6036/travelmap:v3` | amd64 + arm64 | 同上，固定版本号，适合想锁版本的部署 |
 
-> ⚠️ **当前 `:latest` 是单架构 amd64**（受发布端 Docker Hub 访问限制，暂未拼成 amd64+arm64 合一的 manifest list）。因此：
-> - **x86 机器**：`docker-compose.prod.yml` 默认用 `:latest`，直接 `pull && up -d` 即可原生运行，无需任何改动。
-> - **Mac / ARM 机器**：**不要直接拉 `:latest`**（会被当成 amd64，触发 Rosetta 转译或报 `exec format error`）。请把 `docker-compose.prod.yml` 里 travelmap 服务的 `image` 改成 `${DH_USER}/travelmap:arm64` 再 `pull && up -d`；或先 `docker pull wyc6036/travelmap:arm64` 再手动 `docker run`。
->
-> 待发布端网络恢复后，`:latest` 会升级成真正的多架构镜像，到时 ARM 机器也能直接 `:latest`（无需改 compose）。
+> 多架构信息可用 `docker buildx imagetools inspect wyc6036/travelmap:latest` 核对（会列出 `linux/amd64` 与 `linux/arm64` 两条）。
+> 回滚或锁版本时，把 `.env` 的 `DH_USER` 保持不动、在 compose 里把 `image: ...:latest` 临时改成 `:v3` 即可。
 
 ---
 
 ## 五、发布新版镜像（维护者）
 
 把本地改动构建成镜像并推到 Docker Hub，供「四」里的部署机拉取。
-
-### 1. 前置
-
-- `docker login` 已登录 Docker Hub（发布需要凭证）。
-- 多架构构建一般 Docker Desktop 已内置 QEMU 模拟，无需额外操作；若 buildx 报错找不到平台，先：
-  ```bash
-  docker buildx create --use
-  docker run --privileged --rm tonistiigi/binfmt --install all
-  ```
-
-### 2. 常规方式（Docker Hub 可正常访问时，推荐）
-
-一次打出 amd64 + arm64 并推送 manifest list：
+**完整运维手册见 [docs/PUBLISHING.md](docs/PUBLISHING.md)**（原理、一次性前置、验证、中间 tag 清理、报错速查表都在那里）。
 
 ```bash
-./publish.sh wyc6036            # 推 :v1 和 :latest（含 amd64+arm64）
-./publish.sh wyc6036 v2         # 升版本，推 :v2 和 :latest
+docker login                       # 只需一次
+./publish.sh wyc6036 v4            # 路线 A：直连，一次出 amd64 + arm64 多架构索引
+./publish.sh wyc6036 v4 --proxy    # 路线 B：Mac 挂代理（默认端口 7890，可写 --proxy 7891）
 ```
 
-这样无论 ARM 还是 x86 部署机都能直接拉到对应架构，不会出现 `manifest unknown / 404`。
-
-### 3. 国内 Docker Hub 污染时的退化方案
-
-若 `registry-1.docker.io` 的 manifest 读取被污染（返回 `Bad Gateway`），`buildx` 直接 `--platform linux/amd64,linux/arm64 --push` 会在拼 manifest list 那一步失败。此时改为**分两次单架构构建 + 推送**（单架构 `docker push` 走 blob PUT，路径通常可用，偶发超时重试即可断点续传）：
-
-```bash
-# —— amd64（满足 x86 部署机，并作为 :latest）——
-docker buildx build --platform linux/amd64 --load -t wyc6036/travelmap:amd64 .
-docker tag wyc6036/travelmap:amd64 wyc6036/travelmap:latest
-docker push wyc6036/travelmap:amd64
-docker push wyc6036/travelmap:latest
-
-# —— arm64（供 Mac / ARM）——
-# NODE_BASE 指定本地已拉好的真实 arm64 node 基础镜像（见下方说明）
-docker buildx build --platform linux/arm64 --load --build-arg NODE_BASE=node-arm64-real -t wyc6036/travelmap:arm64 .
-docker push wyc6036/travelmap:arm64
-```
-
-> **关于 `NODE_BASE`**：Dockerfile 新增了可选构建参数 `ARG NODE_BASE=node:20-slim`（两处 `FROM ${NODE_BASE}`）。国内网络下 `node:20-slim` 经部分镜像代理会被错误地只返回单一架构，导致交叉架构构建出的镜像 base 层错乱（在异架构机 `exec format error`）。退化方案里可先用多架构代理（如 `docker.1ms.run`）按 digest 拉取**真实架构**的 node 镜像并打 tag（例如 `node-amd64-real` / `node-arm64-real`），再传给 `NODE_BASE` 让 buildx 离线使用正确基础镜像。正常情况下不传 `NODE_BASE` 即可。
-
-> 注：退化方案下 `:latest` 只是 amd64 单架构（见「四、3」）。等网络恢复，重跑「2. 常规方式」即可把 `:latest` 升级成真正的多架构 manifest list。
+- **路线 A（直连 buildx）**：`buildx --push` 一次构建两架构。服务器或能直连 Docker Hub 的机器用它。
+- **路线 B（守护进程 + 代理）**：`--proxy` 触发。分架构 `docker build` + `push`，再用 `imagetools create` 合成多架构索引。**Mac 上必须用这条**——`buildx` 的 docker-container builder 拿不到代理，会撞 DNS 投毒报 `i/o timeout`。
+- Docker Desktop 代理怎么填、Clash 为什么必须开 Allow LAN、`scutil --proxy` 自检 → [docs/PUBLISHING.md](docs/PUBLISHING.md) 第一、二节
+- `TLS connect ... EOF`、`is a manifest list`、`timeout awaiting response headers` 等报错对照表 → 该文档第七节
+- 国内 `node:20-slim` 被镜像代理返回错架构时的 `NODE_BASE` 退化做法 → 该文档第七节末
 
 ---
 

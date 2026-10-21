@@ -1,65 +1,70 @@
 # =========================================================
-# docker-compose.yml · 一键部署 TravelMap + MinIO
+# docker-compose.yml · 单文件版（开发构建 + 部署拉镜像 通用）
+# ---------------------------------------------------------
 # 用法：
-#   docker compose up -d --build
-#   浏览器访问 http://<小主机IP>:8080
+#   开发（本机有源码）：  docker compose up -d --build
+#   部署（只有镜像）：    docker compose pull && docker compose up -d   ← 不要加 --build
+#   访问：               http://<主机IP>:${APP_PORT:-8080}
+#   停止：               docker compose down
 #
-# 媒体文件统一存进 MinIO（S3 兼容对象存储）。
-# MinIO 的磁盘落盘默认绑定挂载到项目内的 ./minio-data（Finder 可直接查看/备份/拷贝）。
-# 想存到别的目录：在 docker-compose.yml 同级建 .env，写 MINIO_DATA_DIR=/你的/绝对/路径，
-# 然后 docker compose up -d 即可。
-# 不想要内置 MinIO 的话：删掉 minio 服务，并在 travelmap 的 environment
-# 里把 MINIO_ENDPOINT 改成你自己的 MinIO / S3 地址即可。
+# 配置全部走同目录 .env（模板见 .env.example）：
+#   DH_USER          镜像所属 Docker Hub 用户名（默认 wyc6036）
+#   ADMIN_PASSWORD   访问密码（必填）
+#   APP_PORT         主机端口（默认 8080）
+#   MINIO_ACCESS_KEY / MINIO_SECRET_KEY  MinIO 账号（默认即可）
+#   MINIO_DATA_DIR / APP_DATA_DIR        数据落盘目录
 #
-# 应用数据（SQLite 库 + 上传的媒体缩略图）默认绑定挂载到项目内的 ./data
-# （Finder 可直接查看/备份，容器重建不丢）。
-# 想换目录：在同级 .env 里写 APP_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
+# 注意：本文件同时含 build 与 image（这是 Compose 官方的「有则用、无则建」写法，
+# 实测行为＝先尝试 pull，pull 不到才回退到 build）：
+#   · 开发机（有源码/Dockerfile）：`up -d --build` 强制重建，并用 image 指定名打标签；
+#   · 部署机（只有镜像）：`docker compose pull` 先落地镜像，再 `up -d`；
+#     只要 pull 成功就不会触发构建。切勿加 `--build`。
+#   · 万一部署机 pull 失败（断网/标签写错），up 会回退去 build，
+#     此时因缺 Dockerfile 会报错 —— 修好网络后重跑 `docker compose pull` 即可。
 # =========================================================
 services:
   minio:
-    # MinIO 官方自 2025-10 起停止分发 Docker 镜像（社区版改为仅源码发布），
-    # Docker Hub / Quay 上的 minio/minio 镜像已全部下线、无法拉取。
-    # 改用 Chainguard 从官方源码持续重建的免费镜像（同一份 MinIO，S3 协议与
-    # 数据格式完全兼容，默认非 root 运行，已验证现有 minio-data 可直接挂载）：
+    # MinIO 官方自 2025-10 起停止分发 Docker 镜像（社区版改为仅源码发布）。
+    # 改用 Chainguard 从官方源码持续重建的免费镜像（S3 协议与数据格式完全兼容）：
     # https://www.chainguard.dev/unchained/secure-and-free-minio-chainguard-containers
     image: cgr.dev/chainguard/minio:latest
     container_name: travelmap-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: travelmap
-      MINIO_ROOT_PASSWORD: changeme-minio-password
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-travelmap}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-changeme-minio-password}
     ports:
       # 9001 是管理控制台；如需在宿主机用 mc 操作 API，自行加 "9000:9000"
       - "9001:9001"
-    # 媒体落盘：默认绑定到项目内 ./minio-data（Finder 可直接查看/备份）。
-    # 想换目录：在同级 .env 里写 MINIO_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
     volumes:
+      # 媒体落盘：默认绑定到项目内 ./minio-data（可直接查看/备份）
       - ${MINIO_DATA_DIR:-./minio-data}:/data
     restart: unless-stopped
 
   travelmap:
+    # 部署拉镜像用；本地开发 `--build` 会用下面 build 构建并打上这个标签
+    image: ${DH_USER:-wyc6036}/travelmap:latest
     build: .
     container_name: travelmap
     depends_on:
       - minio
     ports:
-      - "8080:8080"
+      - "${APP_PORT:-8080}:8080"
     environment:
       - PORT=8080
       - DATA_DIR=/data
-      # 必填：访问密码。留空则任何人都可访问并写入（仅本地测试时用）。
-      - ADMIN_PASSWORD=change-me-please
+      # 必填：访问密码（在 .env 里设置）。留空启动会报错提示。
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 设置 ADMIN_PASSWORD}
       # 选填：会话签名密钥。不填则每次容器重启随机生成（已登录会话会失效需重登）。
-      - SESSION_SECRET=
-      # 媒体存储：MinIO（S3 兼容）
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # 媒体存储：内置 MinIO（S3 兼容），与上面 minio 服务的账号保持一致
       - MINIO_ENDPOINT=minio
       - MINIO_PORT=9000
       - MINIO_USE_SSL=false
-      - MINIO_ACCESS_KEY=travelmap
-      - MINIO_SECRET_KEY=changeme-minio-password
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-travelmap}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-changeme-minio-password}
       - MINIO_BUCKET=travelmap
     volumes:
-      # 应用数据（SQLite 库 + 上传媒体）：默认绑定到项目内 ./data（Finder 可直接查看/备份）。
-      # 想换目录：在同级 .env 里写 APP_DATA_DIR=/你的/绝对/路径，再 docker compose up -d。
+      # 应用数据（SQLite 库 + 上传媒体）：默认绑定到项目内 ./data
       - ${APP_DATA_DIR:-./data}:/data
     restart: unless-stopped

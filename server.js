@@ -25,7 +25,7 @@ const { spawn } = require('child_process');
 const { DATA_DIR, uid, getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed, saveTypes, getMeta, setMeta,
   createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
   updateMedia, setPlaceCoverUrl, setMediaMeta, migrateMediaMeta,
-  markMediaReady, markMediaError, ensureGeocitiesLoaded,
+  markMediaReady, markMediaError, ensureGeocitiesLoaded, getPendingMediaCount,
   getWishes, upsertWishAnnotation, deleteWishAnnotation, saveWishPlace, deleteWishPlace } = require('./src/db');
 const { AUTH_ENABLED, requireAuth, login, makeToken } = require('./src/auth');
 const storage = require('./src/storage');
@@ -437,6 +437,17 @@ app.post('/api/gps/apply', write, (req, res) => {
     res.json({ ok: true, ...r });
   } catch (e) {
     res.status(500).json({ error: e.message || '归档失败' });
+  }
+});
+
+/* 待整理照片计数：未归类（不属于任何地点）的媒体数量。
+   首页「待整理照片」小组件用它做头条数字 —— 未归类照片不在 /api/data 的 places 里，
+   前端拿不到，只能单独问一次。只回一个数字，不拉整行。 */
+app.get('/api/media/pending', requireAuth, (_req, res) => {
+  try {
+    res.json({ count: getPendingMediaCount() });
+  } catch (e) {
+    res.status(500).json({ error: e.message || '读取待整理照片失败' });
   }
 });
 

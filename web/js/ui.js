@@ -25,7 +25,7 @@ import { MEDIA_LABELS, VIEW_META, COLORS, regionLabel } from './config.js';
 import { api } from './api.js';
 import { CITIES } from './cities.js';
 import {
-  escapeHtml, formatDateDot, formatDateRange, countUp, toast,
+  escapeHtml, formatDateDot, formatDateRange, countUp, toast, parseDate,
 } from './utils.js';
 /* 统计页拆到独立模块（内容多、且几乎全是自绘图表，混在本文件里不好维护）。
    这里只做"注入依赖 + 桥接事件"，图表本身一行都不在 ui.js 里。 */
@@ -176,7 +176,7 @@ function pickDom(map) {
   return out;
 }
 
-export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive }) {
+export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive, onEditPlace }) {
   const dom = pickDom({
     nav: '#tm-nav',
     scroll: '#tm-scroll',
@@ -1753,11 +1753,19 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
    * ========================================================= */
   const STORAGE_KEY = 'travelmap.layout.v1';
   const GRID_SIZES = ['1x1', '2x1', '1x2', '2x2', '3x2'];
+  /* 出厂默认布局：三行都刚好铺满（4 列）
+       行1  最近足迹 2 + 愿望清单 1 + 我的记录 1
+       行2  最近一次旅行 2 + 旅途海报 2
+       行3  最爱几月 2 + 抽签下一站 1 + 待整理照片 1 */
   const DEFAULT_LAYOUT = [
     { type: 'recent', size: '2x1' },
     { type: 'wishlist', size: '1x1' },
     { type: 'collections', size: '1x1' },
+    { type: 'lastTrip', size: '2x1' },
     { type: 'poster', size: '2x2' },
+    { type: 'month', size: '2x1' },
+    { type: 'roulette', size: '1x1' },
+    { type: 'pending', size: '1x1' },
   ];
 
   function currentCols() {
@@ -1774,7 +1782,110 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     return `${Math.min(w, currentCols())}x${h}`;
   }
 
-  /* 已实现的 4 个组件 + 4 个占位（第二阶段） */
+  /* ---------- 小组件共用的派生数据 ----------
+     这 4 个组件都是"同一批足迹换一种说法"，派生逻辑留在这里，
+     组件 mount() 里只管画 DOM —— 免得每个组件各写一份口径。 */
+  const MONTH_NAMES = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+
+  /** 最近一次旅行：优先「行程」（一次行程可覆盖多座城市），没写行程就退化为最近的一个过去足迹 */
+  function lastTripInfo() {
+    const now = Date.now();
+    /* ⚠️ 只认「挂了地点」的行程：数据里存在同名空壳行程（同一趟行程有两条记录，
+       一条只填了日期、一条只填了地点名），空壳会把「N 个地点 / N 份记录」显示成 0，
+       看起来像坏了。没有可用行程时退回最近一个过去足迹，信息至少是真的。 */
+    const trips = (state.trips || [])
+      .filter((t) => t.dateTs && t.dateTs <= now && (t.places || []).length)
+      .map((t) => {
+        const list = t.places || [];
+        const placeEnd = list.reduce((mx, p) => Math.max(mx, p.dateTs || 0), 0);
+        const startTs = t.dateTs;
+        const endTs = Math.max(parseDate(t.endDate).ts || 0, placeEnd, startTs);
+        return {
+          trip: t,
+          list,
+          startTs,
+          endTs,
+          mediaCount: list.reduce((n, p) => n + (p.mediaCount ? p.mediaCount.total : 0), 0),
+          cover: t.cover || (list.find((p) => p.cover) || {}).cover || '',
+        };
+      })
+      .sort((a, b) => b.endTs - a.endTs);
+    const best = trips[0];
+    if (best) {
+      const t = best.trip;
+      return {
+        kind: 'trip',
+        name: t.name,
+        trip: t,
+        date: t.date,
+        /* 行程没写结束日期时，用组内最后一个地点补上区间（否则只显示一个孤零零的日期） */
+        endDate: t.endDate || formatDateDot(new Date(best.endTs).toISOString().slice(0, 10)),
+        days: Math.max(1, Math.round((best.endTs - best.startTs) / 86400000) + 1),
+        placeCount: best.list.length,
+        mediaCount: best.mediaCount,
+        cover: best.cover,
+        target: best.list[0] || null,
+      };
+    }
+    const p = computeStats().past[0];
+    if (!p) return null;
+    const endTs = Math.max(parseDate(p.endDate).ts || 0, p.dateTs);
+    return {
+      kind: 'place',
+      name: p.name,
+      trip: null,
+      date: p.date,
+      endDate: p.endDate,
+      days: Math.max(1, Math.round((endTs - p.dateTs) / 86400000) + 1),
+      placeCount: 1,
+      mediaCount: p.mediaCount ? p.mediaCount.total : 0,
+      cover: p.cover || '',
+      target: p,
+    };
+  }
+
+  /** 「待整理」三个口径：未归类照片（服务端）/ 缺拍摄时间的照片 / 缺日期的地点 */
+  function pendingBuckets(remoteCount) {
+    const places = (state && state.places) || [];
+    const noTime = [];   // { place, media }
+    const noDate = [];   // place
+    places.forEach((p) => {
+      if (!p.dateTs) noDate.push(p);
+      p.media.forEach((m) => {
+        if (m.type === 'text') return;         // 文字笔记本来就没有拍摄时间
+        if (!m.takenAt) noTime.push({ place: p, media: m });
+      });
+    });
+    const unassigned = Number.isFinite(remoteCount) && remoteCount > 0 ? remoteCount : 0;
+    return {
+      unassigned,
+      noTime: noTime.length,
+      noTimePlace: noTime[0] ? noTime[0].place : null,
+      noDate: noDate.length,
+      noDatePlace: noDate[0] || null,
+      total: unassigned + noTime.length + noDate.length,
+    };
+  }
+
+  /* 未归类照片要走一次后端（不在 /api/data 的 places 里）：
+     60s 内不重复问；失败也记时间，避免每轮 15s 轮询都重试。
+     ui.js 里其它地方从不缓存请求结果，这里破例是因为 update() 会被轮询反复调用。 */
+  const pendingRemote = { at: 0, count: null, busy: false };
+  function loadPendingRemote(done) {
+    if (pendingRemote.busy) return;
+    if (pendingRemote.count !== null && Date.now() - pendingRemote.at < 60000) return;
+    pendingRemote.busy = true;
+    api.pendingMedia()
+      .then((r) => { pendingRemote.count = Number(r && r.count) || 0; })
+      .catch(() => { pendingRemote.count = null; })
+      .finally(() => {
+        pendingRemote.at = Date.now();
+        pendingRemote.busy = false;
+        done?.();
+      });
+  }
+
+  /* 组件注册表：8 个组件，全部可用（原来 4 个占位的第二阶段已落地） */
   const WIDGET_DEFS = {
     recent: {
       title: '最近足迹', defaultSize: '2x1',
@@ -1872,11 +1983,279 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         };
       },
     },
-    // —— 以下 4 个新组件第二阶段实现，先占位（comingSoon，替换弹窗里置灰）——
-    pending:     { title: '待整理照片', defaultSize: '1x1', comingSoon: true },
-    lastTrip:    { title: '最近一次旅行', defaultSize: '2x1', comingSoon: true },
-    roulette:    { title: '抽签下一站', defaultSize: '1x1', comingSoon: true },
-    month:       { title: '你最爱几月出发', defaultSize: '2x1', comingSoon: true },
+    /* ---------- 待整理照片（1×1）：三个「能立刻动手」的口径 ----------
+       头条数字是总项数，下面固定三行可点的清单（0 项的行置灰）。
+       ⚠️「未归类照片」不在 /api/data 里（那些媒体 place_id 为空，不属于任何地点），
+          只能单独问后端；另外两类从已有地点/媒体现场算。 */
+    pending: {
+      title: '待整理照片', defaultSize: '1x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">待整理照片</h3>
+          <button class="link" data-role="go">去整理
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('pnd');
+
+        const goArchive = () => {
+          if (typeof onOpenArchive === 'function') onOpenArchive();
+          else toast('批量归类功能未就绪', 2400);
+        };
+        head.querySelector('[data-role="go"]').addEventListener('click', goArchive);
+
+        const paint = () => {
+          const b = pendingBuckets(pendingRemote.count);
+          if (pendingRemote.count !== null && !b.total) {
+            body.innerHTML = emptyState('都整理好了', '照片的时间、地点、归类都齐了');
+            return;
+          }
+          /* 三行固定出现（计数为 0 的行置灰），不做「有才显示」——
+             否则整理掉一项后卡片高度/条目顺序都会跳，像是抽掉了什么。
+             未归类照片要走一次后端，数据没到手前那行显示「·」而不是 0（0 会是假话）。 */
+          const rows = [
+            { label: '未归类照片', n: pendingRemote.count === null ? null : b.unassigned, c: 'var(--c1)', on: goArchive },
+            { label: '缺拍摄时间', n: b.noTime, c: 'var(--c4)', on: () => b.noTimePlace && onOpenDetail?.(b.noTimePlace) },
+            { label: '缺日期', n: b.noDate, c: 'var(--c2)', on: () => {
+              if (!b.noDatePlace) return;
+              if (typeof onEditPlace === 'function') onEditPlace(b.noDatePlace);
+              else onOpenDetail?.(b.noDatePlace);
+            } },
+          ];
+
+          body.innerHTML = `<div class="pnd__sum"><b>${b.total}</b><span>项待整理</span></div><div class="pnd__list"></div>`;
+          const list = body.querySelector('.pnd__list');
+          rows.forEach((r) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `pnd__row${r.n ? '' : ' is-zero'}`;
+            btn.style.setProperty('--c', r.c);
+            btn.title = r.label;
+            btn.innerHTML = `<span class="pnd__dot"></span><span class="pnd__label">${r.label}</span>`
+              + `<b class="pnd__n">${r.n === null ? '·' : r.n}</b>`
+              + `<svg class="ico ico--sm pnd__arrow" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>`;
+            btn.addEventListener('click', r.on);
+            list.append(btn);
+          });
+        };
+
+        return {
+          update() {
+            paint();
+            loadPendingRemote(paint);   // 未归类照片数到手后再画一次
+          },
+        };
+      },
+    },
+
+    /* ---------- 最近一次旅行（2×1）：封面 + 日期 + 三个数字 ----------
+       优先「行程」（一次行程可覆盖多座城市），没写行程就退化为最近一个过去足迹。
+       点卡片：行程 → 弹窗里跑路线动画；单个足迹 → 地点详情。 */
+    lastTrip: {
+      title: '最近一次旅行', defaultSize: '2x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">最近一次旅行</h3>
+          <button class="link" data-view="footprints">全部足迹
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('lt');
+        head.querySelector('[data-view="footprints"]').addEventListener('click', () => setView('footprints'));
+
+        const openInfo = (info) => {
+          if (!info) return;
+          if (info.kind === 'trip' && typeof onOpenTrip === 'function') { onOpenTrip(info.trip); return; }
+          if (info.target) onOpenDetail?.(info.target);
+        };
+
+        return {
+          update() {
+            const info = lastTripInfo();
+            if (!info) {
+              body.innerHTML = emptyState('还没有出发记录', '有日期的足迹会在这里汇总成一次旅行');
+              return;
+            }
+            const when = info.endDate
+              ? formatDateRange(info.date, info.endDate)
+              : (formatDateDot(info.date) || '未写日期');
+            /* 行程的站点名（超过 4 个收成「等 N 站」）：单点足迹不显示这一行 */
+            const names = info.kind === 'trip' && info.trip
+              ? (info.trip.places || []).map((p) => p.name)
+              : [];
+            const stops = names.length > 1
+              ? `${names.slice(0, 4).join(' · ')}${names.length > 4 ? ` 等 ${names.length} 站` : ''}`
+              : '';
+            body.innerHTML = `
+              <div class="lt__cover">
+                ${info.cover ? `<img src="${escapeHtml(info.cover)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />` : ''}
+                <span class="lt__tag">${info.kind === 'trip' ? '行程' : '足迹'}</span>
+              </div>
+              <div class="lt__info">
+                <p class="lt__when">${escapeHtml(when)}</p>
+                <p class="lt__name">${escapeHtml(info.name)}</p>
+                <div class="lt__stats">
+                  <span><b>${info.days}</b> 天</span>
+                  <span><b>${info.placeCount}</b> 个地点</span>
+                  <span><b>${info.mediaCount}</b> 份记录</span>
+                </div>
+                ${stops ? `<p class="lt__stops" title="${escapeHtml(names.join(' → '))}">${escapeHtml(stops)}</p>` : ''}
+              </div>
+              <span class="lt__cta">${info.kind === 'trip' ? '走一遍' : '看看'}</span>
+              <button type="button" class="lt__hit" aria-label="打开 ${escapeHtml(info.name)}"></button>`;
+            const img = body.querySelector('.lt__cover img');
+            /* 封面文件缺失（离线/被清理）时整块让位，不显示破图 */
+            img?.addEventListener('error', () => img.remove(), { once: true });
+            body.querySelector('.lt__hit').addEventListener('click', () => openInfo(info));
+          },
+        };
+      },
+    },
+
+    /* ---------- 抽签下一站（1×1）：从「待出发」的心愿里随机抽一个 ----------
+       滚动抽签是纯前端动画（setTimeout 逐帧换名字 + 减速），落地后点名字可直接进详情。 */
+    roulette: {
+      title: '抽签下一站', defaultSize: '1x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">抽签下一站</h3>
+          <button class="link" data-view="wishlist">心愿清单
+            <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>`;
+        body.classList.add('rlt');
+        body.innerHTML = `
+          <div class="rlt__stage">
+            <p class="rlt__kicker" data-role="kicker">从心愿清单里抽一签</p>
+            <p class="rlt__name" data-role="name">准备好了吗</p>
+            <p class="rlt__sub" data-role="sub"></p>
+          </div>
+          <button type="button" class="rlt__go" data-role="go">抽一签</button>`;
+        head.querySelector('[data-view="wishlist"]').addEventListener('click', () => setView('wishlist'));
+
+        const nameEl = body.querySelector('[data-role="name"]');
+        const subEl = body.querySelector('[data-role="sub"]');
+        const kickerEl = body.querySelector('[data-role="kicker"]');
+        const goEl = body.querySelector('[data-role="go"]');
+        const w = { pool: [], cur: null, idx: 0, timer: 0, spinning: false };
+
+        function resetIdle() {
+          w.cur = null;
+          nameEl.textContent = '准备好了吗';
+          nameEl.classList.remove('is-hit', 'is-rolling');
+          kickerEl.textContent = '从心愿清单里抽一签';
+          goEl.textContent = '抽一签';
+          goEl.disabled = false;
+        }
+        function syncPool() {
+          const all = wishlistPlaces();
+          w.pool = all.filter((p) => !wishDone(p));   // 已实现的沉底，不参与抽签
+          subEl.textContent = all.length
+            ? `心愿 ${all.length} 个 · 待出发 ${w.pool.length} 个`
+            : '愿望清单还是空的';
+          if (w.cur && !w.pool.includes(w.cur)) resetIdle();
+        }
+        function settle() {
+          const n = w.pool.length;
+          let i = Math.floor(Math.random() * n);
+          if (n > 1 && w.pool[i] === w.cur) i = (i + 1) % n;
+          w.idx = i;
+          w.cur = w.pool[i];
+          w.spinning = false;
+          nameEl.classList.remove('is-rolling', 'is-hit');
+          void nameEl.offsetWidth;          // 强制重排，让 is-hit 的动画每次都重新播
+          nameEl.textContent = w.cur.name;
+          nameEl.classList.add('is-hit');
+          kickerEl.textContent = '这一站去';
+          subEl.textContent = w.cur.countryZh || w.cur.country || w.cur.city || '点名字看详情';
+          goEl.textContent = '再抽一次';
+          goEl.disabled = false;
+        }
+        function spin() {
+          if (w.spinning) return;
+          syncPool();
+          if (!w.pool.length) { toast('愿望清单里还没有待出发的地方', 2600); return; }
+          w.spinning = true;
+          goEl.disabled = true;
+          goEl.textContent = '抽签中…';
+          kickerEl.textContent = '正在摇签筒';
+          nameEl.classList.remove('is-hit');
+          nameEl.classList.add('is-rolling');
+          let remain = 18;
+          const tick = () => {
+            w.idx = (w.idx + 1) % w.pool.length;
+            nameEl.textContent = w.pool[w.idx].name;
+            remain -= 1;
+            if (remain <= 0) { w.timer = 0; settle(); return; }
+            w.timer = setTimeout(tick, remain <= 3 ? 130 : remain <= 7 ? 90 : 55);   // 越接近落地越慢
+          };
+          w.timer = setTimeout(tick, 55);
+        }
+
+        goEl.addEventListener('click', spin);
+        nameEl.addEventListener('click', () => {
+          if (!w.cur) return;
+          if (!Number.isFinite(w.cur.lng) || !Number.isFinite(w.cur.lat)) {
+            toast('这个心愿还没有坐标，先补上再看详情', 2600);
+            return;
+          }
+          onOpenDetail?.(w.cur);
+        });
+
+        return {
+          update() { if (!w.spinning) syncPool(); },
+          destroy() { if (w.timer) clearTimeout(w.timer); },
+        };
+      },
+    },
+
+    /* ---------- 你最爱几月出发（2×1）：12 个月柱状，峰值月高亮 ----------
+       口径与统计页一致：只算「有日期且已过」的足迹（stats.past），一张照片不算一次出发。 */
+    month: {
+      title: '你最爱几月出发', defaultSize: '2x1',
+      mount(head, body) {
+        head.innerHTML = `
+          <h3 class="card__title">你最爱几月出发</h3>
+          <span class="muted" data-role="sum"></span>`;
+        body.classList.add('mon');
+        const sumEl = head.querySelector('[data-role="sum"]');
+
+        return {
+          update() {
+            const stats = computeStats();
+            const counts = new Array(12).fill(0);
+            stats.past.forEach((p) => {
+              /* dateTs 来自 Date.UTC()，必须用 getUTCMonth —— 用本地时区的 getMonth
+                 在东八区会把「每月 1 号」的足迹挪到上一个月（UTC 0 点是本地 8 点，看似无事，
+                 但 UTC-x 时区就会前移一天）。 */
+              const d = new Date(p.dateTs);
+              if (!Number.isNaN(d.getTime())) counts[d.getUTCMonth()] += 1;
+            });
+            const total = counts.reduce((a, b) => a + b, 0);
+            sumEl.textContent = total ? `共 ${total} 次出发` : '';
+            if (!total) {
+              body.innerHTML = emptyState('还没有出发记录', '有日期的足迹会自动按月统计');
+              return;
+            }
+            const max = Math.max(...counts);
+            const peak = counts.indexOf(max);
+            body.innerHTML = `
+              <p class="mon__lead">最常出发的是<b>${MONTH_NAMES[peak]}</b>
+                <span class="mon__pct">${max} 次 · ${Math.round((max / total) * 100)}%</span></p>
+              <div class="mon__bars"></div>`;
+            const bars = body.querySelector('.mon__bars');
+            counts.forEach((n, i) => {
+              const col = document.createElement('div');
+              col.className = `mon__col${i === peak ? ' is-peak' : ''}${n ? '' : ' is-zero'}`;
+              col.title = `${MONTH_NAMES[i]} · ${n} 次`;
+              /* 柱高按「该月次数 / 最高月」的百分比写在柱子上，柱子外面必须有一层
+                 .mon__track 兜住底部对齐 —— 直接给 .mon__col 百分比会让柱子按
+                 「含月份标签」的整列高度算，满格那根会顶掉标签。 */
+              col.innerHTML = `<span class="mon__track"><span class="mon__bar" style="height:${n ? Math.max(12, Math.round((n / max) * 100)) : 0}%"></span></span>`
+                + `<span class="mon__lab">${i + 1}</span>`;
+              bars.append(col);
+            });
+          },
+        };
+      },
+    },
   };
 
   const gridEl = document.getElementById('tm-widget-grid');
@@ -1894,7 +2273,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       if (!raw) return null;
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr) || !arr.length) return null;
-      return arr.filter((s) => WIDGET_DEFS[s.type] && !WIDGET_DEFS[s.type].comingSoon);
+      return arr.filter((s) => WIDGET_DEFS[s.type]);
     } catch (_) { return null; }
   }
   function persistLayout() {
@@ -1926,7 +2305,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     slots = [];
     layout.forEach((slot) => {
       const def = WIDGET_DEFS[slot.type];
-      if (!def || def.comingSoon) return;
+      if (!def) return;
       const el = document.createElement('section');
       el.className = 'card widget';
       el.dataset.type = slot.type;
@@ -1952,6 +2331,16 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       tools.querySelector('.widget__remove').addEventListener('click', (e) => { e.stopPropagation(); removeSlot(rec); });
       slots.push(rec);
     });
+    /* 网格末尾的「＋ 添加模块」：只在编辑态露出（显隐交给 CSS），
+       是 openWidgetSheet(null) 的唯一入口 —— 此前只有卡片上的「替换」能打开那个弹窗，
+       于是一旦把模块移除就再也加不回来。它不是 .widget，所以不参与拖拽，也不进布局。 */
+    const addEl = document.createElement('button');
+    addEl.type = 'button';
+    addEl.className = 'widget-add';
+    addEl.innerHTML = `${icon('plus', 'ico')}<span>添加模块</span>`;
+    addEl.addEventListener('click', (e) => { e.stopPropagation(); openWidgetSheet(null); });
+    gridEl.append(addEl);
+
     if (editing) enterEditVisual();
   }
 
@@ -1967,7 +2356,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
   }
   function addSlot(type = 'recent', size) {
     const def = WIDGET_DEFS[type];
-    if (!def || def.comingSoon) return;
+    if (!def) return;
     layout.push({ type, size: size || def.defaultSize });
     buildGrid();
     renderHome();
@@ -2034,7 +2423,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     setTimeout(() => document.addEventListener('click', closeWidgetMenus, { once: true }), 0);
   }
 
-  /* 替换 / 新增 底部弹窗（列出全部组件，未实现的置灰） */
+  /* 替换 / 新增 底部弹窗（列出全部组件） */
   const sheet = document.getElementById('tm-widget-sheet');
   const sheetMask = document.getElementById('tm-widget-sheet-mask');
   const sheetBody = document.getElementById('tm-widget-sheet-body');
@@ -2045,12 +2434,11 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     sheetTarget = rec || null;
     sheetTitle.textContent = rec ? '替换组件' : '新增组件';
     sheetBody.innerHTML = Object.entries(WIDGET_DEFS).map(([type, def]) => `
-      <button type="button" class="wj-sheet__item${def.comingSoon ? ' is-disabled' : ''}" data-type="${type}" ${def.comingSoon ? 'disabled' : ''}>
+      <button type="button" class="wj-sheet__item" data-type="${type}">
         <span class="wj-sheet__name">${def.title}</span>
-        <span class="wj-sheet__size">${def.defaultSize}${def.comingSoon ? ' · 即将推出' : ''}</span>
+        <span class="wj-sheet__size">${def.defaultSize}</span>
       </button>`).join('');
     sheetBody.querySelectorAll('button[data-type]').forEach((b) => {
-      if (b.disabled) return;
       b.addEventListener('click', () => {
         const type = b.dataset.type;
         if (sheetTarget) {
@@ -2117,9 +2505,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     if (!editing) return;
     if (dragMoved) { dragMoved = false; return; }
     const t = e.target;
-    if (gridEl.contains(t) && !t.closest('.widget')
+    if (gridEl.contains(t) && !t.closest('.widget') && !t.closest('.widget-add')
       && !t.closest('.wj-menu') && !t.closest('.wj-sheet')) { exitEdit(); return; }
-    if (t.closest('.widget') || t.closest('.mapcard') || t.closest('.topbar')
+    if (t.closest('.widget') || t.closest('.widget-add') || t.closest('.mapcard') || t.closest('.topbar')
       || t.closest('.sidebar') || t.closest('.wj-menu') || t.closest('.wj-sheet')
       || t.closest('#tm-edit-widgets')
       || t.closest('button, a, input, select, textarea, label')) return;
