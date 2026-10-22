@@ -8,6 +8,12 @@
 ![Docker](https://img.shields.io/badge/Docker-amd64%20%2B%20arm64-2496ED?logo=docker&logoColor=white)
 ![Frontend](https://img.shields.io/badge/Frontend-%E9%9B%B6%E6%9E%84%E5%BB%BA-orange)
 
+<p align="center">
+  <img src="docs/screenshots/home.webp" alt="TravelMap 首页：世界地图总览（到访国家自动上色）+ iOS 风格小组件（最近足迹 / 愿望清单 / 我的记录）" width="100%">
+</p>
+
+<p align="center"><sub>首页：世界地图总览与国家上色，下方为最近足迹 / 愿望清单 / 我的记录等小组件</sub></p>
+
 ## 功能
 
 - **足迹地图**：MapLibre GL JS + OpenFreeMap 矢量瓦片（无需 API Key），到访国家自动上色，支持点位聚合、图例与路线回放。
@@ -69,6 +75,7 @@ travelmap/
 ├── docker-compose.tunnel.yml # 可选 overlay：额外起 cloudflared 边车，把 8080 通过 CF 隧道暴露公网
 ├── publish.sh               # 唯一发布脚本：构建并推送多架构镜像（--proxy 切 Mac 代理路线）
 ├── docs/PUBLISHING.md       # 运维手册：发布镜像的两条路线、验证、清理、报错速查、代理分工
+├── docs/screenshots/        # README 使用的界面截图（webp，随仓库分发）
 ├── preview/                 # 本地验收产物（Playwright 脚本 + 截图），已 gitignore，不参与构建
 ├── .dockerignore            # 忽略 node_modules / *.db / data/media / minio-data（seed 仍打进镜像）
 ├── .env.example             # 配置模板：APP_PORT / DH_USER / ADMIN_PASSWORD / MINIO_* / 数据目录

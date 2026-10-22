@@ -25,7 +25,7 @@
 ## 文档 / 脚本分工（2026-10-21 整理后，勿再重复造）
 - **README.md** = 主文档（技术栈/结构/使用方法/部署/发布摘要）；**`docs/PUBLISHING.md`** = 发布镜像运维手册（两条路线原理、前置、验证、中间 tag 清理、报错速查、代理分工三定律）；**`preview/README.md`** = 验收脚本索引（哪个脚本验什么、产物命名、怎么跑）。根目录只留 `publish.sh` 一个脚本。
 - 写文档时：运维细节进 `docs/`，README 只留口令级摘要 + 链接，避免两处各写一份互相漂移。
-- **README 为 GitHub 发布重写过（2026-10-22），写作约束**：全文**禁第二人称「你/您」**，一律说明式或祈使句；结构固定为 徽章 → 功能 → 技术栈 → 目录结构 → 快速开始 → 日常运维 → 配置项 → 接口一览 → Docker Hub 部署 → 发布镜像 → 本地开发 → FAQ → 相关文档 → 许可证；提示用 GitHub 告警块 `> [!NOTE]/[!WARNING]/[!IMPORTANT]` 而非 emoji。事实口径：`write = requireAuth`（读写同级鉴权）、**无 CSRF**；`preview/` 已 gitignore，README 不得引用其内文件（会 404）。
+- **README 为 GitHub 发布重写过（2026-10-22），写作约束**：全文**禁第二人称「你/您」**，一律说明式或祈使句；结构固定为 徽章 → 主图 → 功能 → 技术栈 → 目录结构 → 快速开始 → 日常运维 → 配置项 → 接口一览 → Docker Hub 部署 → 发布镜像 → 本地开发 → FAQ → 相关文档 → 许可证；提示用 GitHub 告警块 `> [!NOTE]/[!WARNING]/[!IMPORTANT]` 而非 emoji。事实口径：`write = requireAuth`（读写同级鉴权）、**无 CSRF**；`preview/` 已 gitignore，README 不得引用其内文件（会 404）。主图存 `docs/screenshots/home.webp`（1600×1099，随仓库分发；重截流程见 2026-10-22 日志，截图前须把 temp DB 的 `userProfile.name` 改成中性名）。
 
 ## Docker / 部署
 - **本地起停命令**：起 `docker compose up -d --build`（幂等，不必先 down）；关 `docker compose down`；只停 `docker compose stop`；日志 `docker compose logs -f travelmap`。
