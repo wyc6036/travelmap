@@ -9,7 +9,7 @@
 ![Frontend](https://img.shields.io/badge/Frontend-%E9%9B%B6%E6%9E%84%E5%BB%BA-orange)
 
 <p align="center">
-  <img src="docs/screenshots/home.webp" alt="TravelMap 首页：世界地图总览（到访国家自动上色）+ iOS 风格小组件（最近足迹 / 愿望清单 / 我的记录）" width="100%">
+  <img src="docs/screenshots/home.png" alt="TravelMap 首页：世界地图总览（到访国家自动上色）+ iOS 风格小组件（最近足迹 / 愿望清单 / 我的记录）" width="100%">
 </p>
 
 <p align="center"><sub>首页：世界地图总览与国家上色，下方为最近足迹 / 愿望清单 / 我的记录等小组件</sub></p>
