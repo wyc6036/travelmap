@@ -793,6 +793,10 @@ app.get(/^(?!\/(api|media)).*/, (_req, res) => {
   app.listen(PORT, () => {
     const info = getStorageInfo();
     console.log(`TravelMap 运行中：http://0.0.0.0:${PORT}  (auth=${AUTH_ENABLED ? 'on' : 'off'})`);
+    if (!AUTH_ENABLED) {
+      console.warn('⚠️  未设置 ADMIN_PASSWORD —— 当前没有任何登录校验，任何能访问本端口的人都能读写你的数据。');
+      console.warn('   仅限本机调试；部署到局域网 / 公网前请在 .env 里填 ADMIN_PASSWORD 再重启。');
+    }
     console.log(`数据目录：${DATA_DIR}`);
     console.log(`媒体存储：${info.useMinio
       ? `MinIO bucket "${info.minio.bucket}" @ ${info.minio.endpoint}:${info.minio.port}`

@@ -9,7 +9,7 @@
 #
 # 配置全部走同目录 .env（模板见 .env.example）：
 #   DH_USER          镜像所属 Docker Hub 用户名（默认 wyc6036）
-#   ADMIN_PASSWORD   访问密码（必填）
+#   ADMIN_PASSWORD   访问密码（必填；缺失时不报错，但应用会以「无鉴权开放」启动并在日志告警）
 #   APP_PORT         主机端口（默认 8080）
 #   MINIO_ACCESS_KEY / MINIO_SECRET_KEY  MinIO 账号（默认即可）
 #   MINIO_DATA_DIR / APP_DATA_DIR        数据落盘目录
@@ -53,8 +53,10 @@ services:
     environment:
       - PORT=8080
       - DATA_DIR=/data
-      # 必填：访问密码（在 .env 里设置）。留空启动会报错提示。
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 设置 ADMIN_PASSWORD}
+      # 访问密码：在 .env 里设置（必填，否则应用以「无鉴权开放」模式启动）。
+      # 这里刻意用 :- 而不是 :? —— 前者缺失时为空、后者会让 down/logs/ps 等所有
+      # 命令一起报错（曾经踩过）。缺密码的提醒交给应用启动日志。
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       # 选填：会话签名密钥。不填则每次容器重启随机生成（已登录会话会失效需重登）。
       - SESSION_SECRET=${SESSION_SECRET:-}
       # 媒体存储：内置 MinIO（S3 兼容），与上面 minio 服务的账号保持一致

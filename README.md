@@ -122,6 +122,21 @@ docker compose logs -f travelmap
 
 ### 5. 日常使用
 
+**命令速查**（都在项目根目录执行）：
+
+| 想做什么 | 命令 |
+|---|---|
+| 首次构建并启动 | `docker compose up -d --build` |
+| 改了代码后重启 | `docker compose up -d --build` |
+| 只重启、没改代码 | `docker compose restart travelmap` |
+| 停掉、保留容器 | `docker compose stop` |
+| 停掉并删容器 / 网络（数据保留） | `docker compose down` |
+| 看实时日志 | `docker compose logs -f travelmap` |
+| 看容器状态 / 端口 | `docker compose ps` |
+
+> `up -d --build` 是幂等的：只重建有变更的部分，其余走缓存，**不需要先 `down` 再 `up`**。
+> 所有 compose 命令都读同目录 `.env`；即使 `.env` 不在也能 `down` / `logs`（此时应用运行在无鉴权模式，启动日志会打 ⚠️ 警告）。
+
 - **记录新足迹**：点顶部「记录新足迹」→ 填名称 / 类型 / 日期 / 经纬度（可点「在地图上拾取坐标」）→ 选照片 / 视频或写笔记 → 保存。地图与海报墙自动刷新。
 - **视频**：iPhone 拍的 HEVC 会在服务端转成 H.264（等几秒到几十秒），转完才出现在墙上。
 - **编辑已有数据**：删除 / 修改地点与行程的接口已就绪（`PUT/DELETE /api/places/:id` 等），目前 UI 以新增 / 上传为主，后续可补编辑界面。
