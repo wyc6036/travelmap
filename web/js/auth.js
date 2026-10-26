@@ -88,13 +88,3 @@ export function showLogin() {
     if (input) input.focus();
   }
 }
-
-/** 当前是否启用了密码登录（供 UI 决定是否显示退出按钮等） */
-export async function isAuthEnabled() {
-  try {
-    const cfg = await api.getConfig();
-    return !!(cfg && cfg.authEnabled);
-  } catch (_) {
-    return false;
-  }
-}

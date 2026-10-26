@@ -8,7 +8,7 @@
  *   - media[] 归一化，缺省时按地点生成稳定的占位多媒体（便于后续平滑替换真实存储）
  */
 
-import { CONFIG, COLORS, MEDIA_TYPES } from './config.js';
+import { CONFIG, COLORS } from './config.js';
 import { pick, parseDate, hashString, warnOnce } from './utils.js';
 
 /* =========================================================
@@ -323,6 +323,3 @@ export function startPolling(onData, { onUnauthorized } = {}) {
   }, CONFIG.pollIntervalMs);
   return () => clearInterval(timer);
 }
-
-/** 媒体类型合法性 */
-export const isValidMediaType = (t) => MEDIA_TYPES.includes(t);

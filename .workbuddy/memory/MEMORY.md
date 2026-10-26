@@ -23,6 +23,7 @@
 - 后台进程用 `run_in_background`，不要 `&`。`preview/` 截图与 `data/*.db-wal/.db-shm` 属产物，应 gitignore。
 
 ## 文档 / 脚本分工（2026-10-21 整理后，勿再重复造）
+- **验收脚本统一走 npm**：`npm run serve:test`（8126）+ `npm run preview:<名>`（NODE_PATH 已烤进 package.json scripts，别再手敲绝对路径）。城市库在 `geonames/cities15000.txt`（2026-10-26 从根目录移入，根目录那个下划线平铺文件曾是死路径）。
 - **README.md** = 主文档（技术栈/结构/使用方法/部署/发布摘要）；**`docs/PUBLISHING.md`** = 发布镜像运维手册（两条路线原理、前置、验证、中间 tag 清理、报错速查、代理分工三定律）；**`preview/README.md`** = 验收脚本索引（哪个脚本验什么、产物命名、怎么跑）。根目录只留 `publish.sh` 一个脚本。
 - 写文档时：运维细节进 `docs/`，README 只留口令级摘要 + 链接，避免两处各写一份互相漂移。
 - **README 为 GitHub 发布重写过（2026-10-22），写作约束**：全文**禁第二人称「你/您」**，一律说明式或祈使句；结构固定为 徽章 → 主图 → 功能 → 技术栈 → 目录结构 → 快速开始 → 日常运维 → 配置项 → 接口一览 → Docker Hub 部署 → 发布镜像 → 本地开发 → FAQ → 相关文档 → 许可证；提示用 GitHub 告警块 `> [!NOTE]/[!WARNING]/[!IMPORTANT]` 而非 emoji。事实口径：`write = requireAuth`（读写同级鉴权）、**无 CSRF**；`preview/` 已 gitignore，README 不得引用其内文件（会 404）。主图存 `docs/screenshots/home.webp`（1600×1099，随仓库分发；重截流程见 2026-10-22 日志，截图前须把 temp DB 的 `userProfile.name` 改成中性名）。
@@ -34,6 +35,11 @@
 - **编排只有 `docker-compose.yml` 一个文件（2026-10-21 合并，`docker-compose.prod.yml` 已删，勿再加回）**：travelmap 服务同时写 `image: ${DH_USER:-wyc6036}/travelmap:latest` + `build: .`，配置全走 `.env`（`APP_PORT`/`DH_USER`/`ADMIN_PASSWORD`/`SESSION_SECRET`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_DATA_DIR`/`APP_DATA_DIR`）。开发 `up -d --build`；部署 `pull && up -d`（**不加 `--build`**）。**实测行为：同时有 build+image 时 `up` 先 pull、pull 不到才回退 build**——所以部署机 pull 成功绝不会构建；pull 失败才去 build（无 Dockerfile 会报错）。`docker-compose.tunnel.yml` 仍作 overlay，基础文件写 `docker-compose.yml`。
 - MinIO 镜像已换 `cgr.dev/chainguard/minio:latest`（官方 2025-10 起停发 Docker 镜像，勿改回 `minio/minio`）；app 侧 S3 协议/桶/端口全兼容。
 - **推 Docker Hub 的最终成功方案（2026-10-21 跑通）**：Mac 挂代理 `http://127.0.0.1:7890`（**必须 http://，填 https:// 会对代理本身 TLS 握手 → EOF**）+ Clash 开 **Allow LAN** + 全局模式。**`docker buildx --push` 推不了**（其 `--driver-opt env.HTTP_PROXY` 对 docker-container builder 的 buildkitd 拉基础镜像不生效，buildkitd 仍直连投毒 IP → i/o timeout）。**改用守护进程**：`docker buildx use default` → `docker build --platform linux/amd64 -t <img>:<tag>-amd64 .` 与 `--platform linux/arm64 ...-arm64 .` 各建一次 → 各自 `docker push`（守护进程代理能成；偶发 commit 超时重试续传）→ **合成多架构必须用 `docker buildx imagetools create -t <img>:<tag> <img>:<tag>-amd64 <img>:<tag>-arm64`（别用老的 `docker manifest create`，会报 `<tag>-amd64 is a manifest list` 拒绝）**。已成功产出 `wyc6036/travelmap:v3` 与 `:latest` 的 amd64+arm64 OCI index（附带的 unknown/unknown attestation 条目正常）。⚠️ 代理分工：`docker push/pull` 走**守护进程**代理（Docker Desktop 设置）；`docker buildx imagetools`/`docker manifest`/`docker login` 是 **CLI 直连 registry**、不吃守护进程代理，需 shell `export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890` 才通。已合并为**唯一发布脚本 `publish.sh`**（`./publish.sh <user> [tag=v1] [--proxy [port]]`）：默认走直连 `buildx --push`；加 `--proxy` 切守护进程路线（内含 export 代理、`buildx use default`、分架构 build+push 重试、`imagetools create` 合成）。原 `publish-mac.sh` 已删除，勿再加回。
+
+## 服务端结构（2026-10-26 拆分后）
+- **server.js 只是装配层**（中间件/路由挂载/启动，~120 行）；领域路由在 `src/routes/{auth,setup,places,media,wishes,backup,profile}.js`（各导出 Router），纯逻辑在 `src/{landmark,exif,transcode,uploads}.js`。新增接口先找对应 routes 文件。
+- 依赖：**express 5.3 / multer 2.5 / compression 1.8**（better-sqlite3 仍 11，升级需单独做+回归）。express 5 下 RegExp SPA 兜底路由可用。
+- 缓存策略：`/vendor` 30d+immutable（须 `app.use('/vendor', ...)` 带前缀挂载，static 挂根不剥前缀）；其余静态 1d；HTML no-cache（无内容 hash）；`/media` 365d immutable；compression 跳过 /media 与 export-zip；`/api/data` 304 靠 express 默认弱 ETag。
 
 ## 可删死代码（2026-10-18 静态审查，0 引用）
 - 应用层：`auth.js:isAuthEnabled`、`wishstore.js:onWishChange`、`utils.js:lerp`/`formatDateCn`、`data.js:isValidMediaType`。地图模块内的（`countries.js:visitedColorMap` 等）边界内暂勿动。

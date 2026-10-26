@@ -42,15 +42,6 @@ function writeJSON(key, val) {
 let wishAnn = readJSON(WISH_KEY, {});
 let newPlaces = readJSON(WISH_PLACES_KEY, []);
 
-const listeners = new Set();
-function emit() { for (const fn of listeners) { try { fn(); } catch (_) {} } }
-
-/** 订阅心愿数据变化（任意一处写入都会触发），返回取消订阅函数 */
-export function onWishChange(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
-
 export { WISH_KEY, WISH_PLACES_KEY };
 
 /* 网络/404/401 等「不可达」：静默（本地镜像仍有效，不必打扰用户）；
@@ -102,8 +93,7 @@ export function initWishes() {
       // 离线 / 404（无后端）/ 401（需登录）：保持本机镜像模式
       console.warn('[wishstore] 拉取服务端心愿失败，使用本机副本：', e && e.message);
     }
-    emit();
-  })();
+    })();
   return _init;
 }
 
@@ -114,7 +104,6 @@ export function getAnn(id) { return wishAnn[id] || {}; }
 export function setAnn(id, patch) {
   wishAnn[id] = { ...getAnn(id), ...patch };
   writeJSON(WISH_KEY, wishAnn);
-  emit();
   pushAnnotation(id);
 }
 
@@ -124,7 +113,6 @@ export function getNewPlaces() { return newPlaces; }
 function addNewPlace(place) {
   newPlaces.push(place);
   writeJSON(WISH_PLACES_KEY, newPlaces);
-  emit();
 }
 
 /**
@@ -179,7 +167,6 @@ export function updateWishPlace(id, { name, country, priority, note, target, lng
   };
   newPlaces[idx] = updated;
   writeJSON(WISH_PLACES_KEY, newPlaces);
-  emit();
   pushPlaceUpdate(updated);
   // 注解（note / priority / target / wish）一并更新
   setAnn(id, { wish: true, priority: priority || 0, note: note || '', target: target || '', addedAt: p.addedAt || Date.now() });
@@ -198,7 +185,6 @@ export function deleteWishPlace(id) {
   writeJSON(WISH_PLACES_KEY, newPlaces);
   delete wishAnn[id];
   writeJSON(WISH_KEY, wishAnn);
-  emit();
   pushDeletePlace(id);
   return true;
 }

@@ -95,7 +95,7 @@ COPY web ./web
 COPY data/seed ./seed
 # 离线逆地理编码城市库（GeoNames cities15000，约 3.4 万城市，城市级粒度）。
 # 首次启动由 db.js.ensureGeocitiesLoaded() 导入 SQLite geocities 表（幂等、仅一次）。
-COPY geonames_cities15000.txt ./geonames/cities15000.txt
+COPY geonames/cities15000.txt ./geonames/cities15000.txt
 
 # 持久数据卷：数据库 + 上传的媒体
 VOLUME ["/data"]

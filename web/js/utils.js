@@ -64,10 +64,6 @@ export function clamp(v, min, max) {
   return v < min ? min : (v > max ? max : v);
 }
 
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
 /** 帧节流：滚动/拖拽等高频事件里使用 */
 export function rafThrottle(fn) {
   let queued = false;
@@ -135,13 +131,6 @@ export function formatDateDot(input) {
   const d = parseDate(input);
   if (!d.valid) return '';
   return `${d.y}.${pad(d.m || 1)}.${pad(d.d || 1)}`;
-}
-
-/** 2024-04-01 → 2024 年 4 月 1 日 */
-export function formatDateCn(input) {
-  const d = parseDate(input);
-  if (!d.valid) return '';
-  return `${d.y} 年 ${d.m || 1} 月${d.d ? ` ${d.d} 日` : ''}`;
 }
 
 /** 日期区间：2024.04.01 - 2024.04.06（同月/同年做简写） */

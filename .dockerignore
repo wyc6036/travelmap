@@ -12,3 +12,5 @@ data/media
 minio-data
 # 测试/预览产物不进镜像
 preview
+# 助手工作区数据（记忆/技能缓存），与镜像无关
+.workbuddy

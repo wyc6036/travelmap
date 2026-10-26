@@ -43,11 +43,17 @@
 
 ```
 travelmap/
-├── server.js                # Express 入口：静态托管 + REST API + 上传转码 + 首屏配置向导
+├── server.js                # Express 装配层：中间件（gzip / 静态缓存）、路由挂载、启动流程
 ├── src/
 │   ├── db.js                # SQLite 数据层；导出与 places.json 同构的数据；库为空时自动 seed
 │   ├── auth.js              # 单密码登录 / 会话校验（HMAC 签名 httpOnly cookie）
-│   └── storage.js           # 媒体存储抽象：MinIO（默认）/ 本地目录；可变配置 + 连通性测试
+│   ├── storage.js           # 媒体存储抽象：MinIO（默认）/ 本地目录；可变配置 + 连通性测试
+│   ├── geocode.js           # 批量 GPS 归档（GeoNames 离线逆地理编码）
+│   ├── landmark.js          # 维基百科地标占位图抓取（新增地点封面）
+│   ├── exif.js              # 媒体元数据提取（图片 EXIF / 视频 ffprobe）
+│   ├── transcode.js         # 视频转码（ffmpeg → mp4 + 首帧）
+│   ├── uploads.js           # multer 上传实例 + 媒体 Content-Type 表
+│   └── routes/              # 按领域拆分的路由：auth / setup / places / media / wishes / backup / profile
 ├── web/                     # 前端（原生 HTML/CSS/ESM，零构建，由 Express 直接托管）
 │   ├── index.html           # 页面骨架：登录遮罩、首屏配置向导 #tm-setup、记录新足迹弹窗
 │   ├── css/                 # tokens / base / layout / components / widget / modal / poster / app
@@ -74,6 +80,8 @@ travelmap/
 ├── docker-compose.yml       # 唯一编排文件：开发 --build 构建、部署 pull 拉镜像共用
 ├── docker-compose.tunnel.yml # 可选 overlay：额外起 cloudflared 边车，把 8080 通过 CF 隧道暴露公网
 ├── publish.sh               # 唯一发布脚本：构建并推送多架构镜像（--proxy 切 Mac 代理路线）
+├── geonames/
+│   └── cities15000.txt      # GeoNames 离线城市库（约 3.4 万城市），首次启动导入 SQLite 供批量 GPS 归档
 ├── docs/PUBLISHING.md       # 运维手册：发布镜像的两条路线、验证、清理、报错速查、代理分工
 ├── docs/screenshots/        # README 使用的界面截图（webp，随仓库分发）
 ├── preview/                 # 本地验收产物（Playwright 脚本 + 截图），已 gitignore，不参与构建
