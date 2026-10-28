@@ -14,7 +14,8 @@
     "preview:widgets-check": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-check.js",
     "preview:widgets-shot": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-shot.js",
     "preview:widgets-grid-shot": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-grid-shot.js",
-    "preview:widgets-narrow": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-narrow.js"
+    "preview:widgets-narrow": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-narrow.js",
+    "preview:mgrid": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/mgrid-check.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

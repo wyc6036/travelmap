@@ -566,7 +566,11 @@ export function createDetailModal({
     cell.title = item.caption || '点击全屏查看';
 
     const thumb = item.type === 'video' && item.poster ? item.poster : (item.thumb_url || item.url);
-    cell.innerHTML = `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.caption || '')}" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+    /* 带上 width/height 属性：浏览器会用这两个数算占位比例，图片没下载完也先把
+       格子撑到正确高度（瀑布流分列不受"0 高度"干扰，也不会加载完再整体跳一下）。 */
+    const dims = mediaDims(item);
+    const sizeAttrs = dims ? ` width="${dims.w}" height="${dims.h}"` : '';
+    cell.innerHTML = `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.caption || '')}"${sizeAttrs} loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
     if (item.type === 'video') {
       cell.insertAdjacentHTML('beforeend',
         '<span class="mgrid__play"><svg class="ico" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>');
@@ -719,6 +723,82 @@ export function createDetailModal({
   }
 
   /**
+   * 后端存了原始宽高就返回 { w, h }，用于给 <img> 补 width/height 占位；
+   * 拿不到（老数据 / 视频无尺寸）返回 null，退化成"加载完才有高度"。
+   */
+  function mediaDims(item) {
+    const w = Math.round(Number(item?.width) || 0);
+    const h = Math.round(Number(item?.height) || 0);
+    return (w > 0 && h > 0) ? { w, h } : null;
+  }
+
+  /**
+   * 瀑布流分列：把一组格子按"放进当前最矮的那一列"摊进 --mgrid-cols 列里。
+   * ---------------------------------------------------------------
+   * 为什么不用 CSS 多列（原来写的 `columns: 3`）：Chrome 的列平衡在条目少时
+   * 会退化成 2 列（第 3 列整条空着），且顺序变成先竖后横——同一个页面里
+   * 图片多的地点正常、图片少的地点就歪，属于不可控的渲染差异（见
+   * preview/mgrid-check.js 的复现数据）。这里改成自己分列：列数由 CSS 变量
+   * 决定（窄屏 2 列），高度只用"高/宽"比例算——各列等宽，所以比例即可
+   * 比较高低，不必等图片加载完再测量。
+   */
+  function masonryCols(grid) {
+    const n = parseInt(getComputedStyle(grid).getPropertyValue('--mgrid-cols'), 10);
+    return Number.isFinite(n) && n > 0 ? n : 3;
+  }
+
+  /** 格子高度：优先用真实宽高比，缺失时按 4:3 估（视频同样是 4:3 占位） */
+  function cellRatio(item) {
+    const d = mediaDims(item);
+    return d ? d.h / d.w : 3 / 4;
+  }
+
+  /**
+   * 按当前列数重新分列。列数没变就什么都不做（只是搬 DOM 会闪）。
+   * rows = [{ cell, ratio }]，每列累积高度 = ratio 之和 + 列间距占比估算。
+   */
+  function fillMasonry(grid) {
+    const rows = grid.__masonry;
+    if (!rows || !rows.length) return;
+    const cols = masonryCols(grid);
+    if (grid.__cols === cols) return;
+
+    /* 列间距换算成"比例"：9px 间距相对列宽。拿不到宽度（网格还没进 DOM）时按 0.03 估 */
+    const width = grid.clientWidth || 0;
+    const colW = width > 0 ? (width - (cols - 1) * 9) / cols : 0;
+    const gapFrac = colW > 0 ? 9 / colW : 0.03;
+
+    const buckets = Array.from({ length: cols }, () => {
+      const el = document.createElement('div');
+      el.className = 'mgrid__col';
+      return { h: 0, el };
+    });
+    rows.forEach(({ cell, ratio }) => {
+      let target = buckets[0];
+      for (const b of buckets) if (b.h < target.h - 1e-6) target = b;
+      target.el.append(cell);
+      target.h += ratio + gapFrac;
+    });
+    /* 空列也留着：grid 的列轨道按 --mgrid-cols 固定，条目少时靠后几列空着即可，
+       不会像多列那样把整块宽度让给前两列 */
+    grid.replaceChildren(...buckets.map((b) => b.el));
+    grid.__cols = cols;
+  }
+
+  /** 对整个子树里的每个网格重排（首次渲染后调用；窄屏切换列数时也靠它） */
+  function layoutMasonry(root) {
+    root.querySelectorAll('.mgrid').forEach(fillMasonry);
+  }
+
+  let mgridObserver = null;
+  /** 列数随视口变化（3 ↔ 2）时才重排，用 ResizeObserver 盯住内容区 */
+  function observeMasonry() {
+    if (mgridObserver || typeof ResizeObserver !== 'function' || !contentEl) return;
+    mgridObserver = new ResizeObserver(() => layoutMasonry(contentEl));
+    mgridObserver.observe(contentEl);
+  }
+
+  /**
    * 把媒体按**拍摄日**分组，返回已排好序的分组。
    * 排序：有日期的按时间升序（时间轴自上而下 = 早 → 晚），无日期的一组沉底。
    * ⚠️ 调用方传进来的 list 必须已经按同一顺序排好 —— mediaCell 的序号
@@ -797,7 +877,13 @@ export function createDetailModal({
 
       const grid = document.createElement('div');
       grid.className = 'mgrid';
-      g.items.forEach(({ item, idx }) => grid.append(mediaCell(item, list, idx)));
+      /* 先按时间顺序建格子，再交给 fillMasonry 分列（分列后 DOM 顺序变成"按列"，
+         所以比例表要和格子一起存下来，重排时直接用） */
+      grid.__masonry = g.items.map(({ item, idx }) => ({
+        cell: mediaCell(item, list, idx),
+        ratio: cellRatio(item),
+      }));
+      grid.append(...grid.__masonry.map((r) => r.cell));
 
       day.append(head, grid);
       grp.append(rail, day);
@@ -867,6 +953,9 @@ export function createDetailModal({
       return da - db;
     });
     contentEl.append(buildTimeline(ordered));
+    /* 分列要在网格进 DOM 之后做：拿得到真实列宽，间距占比才算得准 */
+    layoutMasonry(contentEl);
+    observeMasonry();
   }
 
   /* =========================================================

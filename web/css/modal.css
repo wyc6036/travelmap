@@ -265,10 +265,25 @@
 .modal__empty-btn:hover { filter: brightness(.97); }
 
 /* 大图网格（图片 / 视频）—— 交错瀑布流
-   ⚠️ 用 CSS columns 实现：每张保持原始比例（不再裁成正方形），
-   不等高的卡片自然错落排布，高度接近的"对齐"需求让位于更自然的瀑布流观感。
-   图片按真实宽高流入；视频无自然比例可查，给 4/3 稳妥占位避免 0 高空洞。 */
-.mgrid { columns: 3; column-gap: 9px; }
+   ⚠️ 2026-10-28：从 CSS 多列（columns: 3）改成「JS 分列 + flex 列」的真瀑布流。
+   多列的坑：Chrome 的列平衡在当天条目少时会把 3 列摊成**2 列**（第 3 列整条留白），
+   而且阅读顺序变成先竖后横（上排是 1、3，下排是 2、4）。同一个地点图片数不同
+   就时好时坏，非常不稳定。现在由 detail-modal.js 的 fillMasonry() 按真实宽高比
+   逐张放进"当前最矮的一列"，列数由 --mgrid-cols 决定（窄屏 2 列），
+   图片仍按原始比例展示、不裁切。 */
+.mgrid {
+  --mgrid-cols: 3;
+  display: grid;
+  grid-template-columns: repeat(var(--mgrid-cols), minmax(0, 1fr));
+  column-gap: 9px;
+  align-items: start;
+}
+.mgrid__col {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
 .mgrid__cell {
   position: relative;
   isolation: isolate;
@@ -280,8 +295,7 @@
   background: var(--surface-3);
   cursor: pointer;
   box-shadow: var(--sh-1);
-  break-inside: avoid;
-  margin: 0 0 9px;
+  margin: 0;
 }
 .mgrid__cell img { width: 100%; height: auto; display: block; object-fit: initial; }
 .mgrid__cell video { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -551,7 +565,7 @@
 @media (max-width: 900px) {
   .modal { padding: 0; }
   .modal__panel { width: 100%; height: 100%; border-radius: 0; }
-  .mgrid { columns: 2; }
+  .mgrid { --mgrid-cols: 2; }
   /* 窄屏：信息栏移到底部，与舞台上下堆叠 */
   .lightbox__layout { flex-direction: column; }
   .lightbox__info { flex: 0 0 auto; max-width: none; width: 100%; max-height: 44%; border-left: 0; border-top: 1px solid rgba(255, 255, 255, .08); }
