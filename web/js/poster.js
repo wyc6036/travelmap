@@ -36,34 +36,15 @@ export function createPoster({ root, onOpen }) {
   let paused = false;
 
   /* ---------- 一面卡的内容 ----------
-     照片用 object-fit:contain 按自身比例完整显示，留白处直接露出卡片底色
-     （.pw__face 的 background:var(--surface-3)），不再铺模糊蒙版。
-     这样无论格子是 1×1、1×2 还是 2×2，照片比例都能自然适应、不被硬裁，
-     错落排布的同时也不会被压成横条。 */
+     2026-10-28 按用户选型（方案A）：照片 object-fit:cover 按格子大小裁切铺满，
+     不再保留 contain 完整显示 + 同图模糊衬底（毛玻璃蒙版已整体删除）。
+     格子与照片比例错配时靠 pickNext 的按朝向挑图把裁切控制到最小。 */
   /** 记录媒体宽高比（用于按比例分派：横格优先横图、竖格优先竖图） */
   function markAr(item, w, h) { if (w && h) item._ar = w / h; }
 
   function paintFace(face, item) {
     face.innerHTML = '';
     const displaySrc = item.kind === 'video' ? (item.poster || '') : item.src;
-
-    /* 毛玻璃衬底：同图放大 + 高斯模糊铺满整格。
-       照片（object-fit:contain）留白处露出的是"同图的虚化版"而不是生硬底色，
-       消除比例错配时的大片色条。视频无封面时不加衬底（避免双路解码），
-       退回 .pw__back 的底色兜底。 */
-    const back = document.createElement('div');
-    back.className = 'pw__back';
-    if (displaySrc) {
-      const bi = document.createElement('img');
-      bi.className = 'pw__back-img';
-      bi.src = displaySrc;
-      bi.alt = '';
-      const onBack = () => { markAr(item, bi.naturalWidth, bi.naturalHeight); bi.classList.add('ok'); };
-      if (bi.complete && bi.naturalWidth) onBack();
-      else bi.addEventListener('load', onBack, { once: true });
-      back.append(bi);
-    }
-    face.append(back);
 
     const wrap = document.createElement('div');
     wrap.className = 'pw__wrap';
@@ -126,8 +107,8 @@ export function createPoster({ root, onOpen }) {
   /** 最多等 2.5s：图片一直不来也照翻（淡入会在它到位时补上，总比卡住不动强） */
   const preloadSoft = (item) => Promise.race([preload(item), new Promise((r) => setTimeout(() => r(false), 2500))]);
 
-  /* 按比例分派：先用格子比例筛出"同朝向"的候选（横格→横图、竖格→竖图），
-     没有匹配再回退随机。剩下的轻微错配由毛玻璃衬底兜底。 */
+  /* 按比例分派：cover 裁切下错配代价高（宽格塞竖图 / 竖格塞横图会被裁掉大半），
+     先用格子比例筛出"同朝向"的候选（横格→横图、竖格→竖图），没有匹配再回退随机。 */
   function pickNext(rec) {
     const ar = rec.ar;
     if (ar && pool.length) {

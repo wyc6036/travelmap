@@ -12,6 +12,8 @@
         把每格压回 1.05~2.0，实测保留率 78%~96%（tm-poster-state.mjs 可复算）。
         结论：**「大小不一致」不等于「比例极端」** —— 大小差用 span 拉，
         比例必须留在照片能吃的区间里。
+        （2026-10-28 起照片改 cover 裁切铺满，比例温和的意义从"少留白"变成
+        "少裁掉"——3x2 档最扁块 2.43:1 遇竖图线性只剩 31%，仍需守住这条线。）
      2) 行高用 fr；**aspect-ratio 只在单列（≤1200px）定高**。
         行高写 px 的话，格子会随屏宽变形：屏幕越宽，2×1 横条越扁，
         又退回 4:1。fr + 行高随宽度等比缩放，任何屏宽下每格的"长宽比"都保持不变。
@@ -136,29 +138,14 @@
   backface-visibility: hidden;
 }
 
-/* 毛玻璃衬底：铺在照片（contain）下层，填满整格。
-   照片留白处露出的是同图模糊版，而不是生硬底色。
-   图未到位时退化成 .pw__face 的底色（见上方 background）。 */
-.pw__back {
-  position: absolute; inset: 0;
-  z-index: 0;
-  background: var(--surface-3);
-}
-.pw__back-img {
-  position: absolute; inset: -8%;
-  width: 116%; height: 116%;
-  object-fit: cover;
-  filter: blur(16px) brightness(.92) saturate(1.12);
-  transform: scale(1.04);
-  opacity: 0;
-  transition: opacity var(--dur-fast, .2s) var(--ease);
-}
-.pw__back-img.ok { opacity: 1; }
+/* ⚠️ 2026-10-28 按用户选型（方案A）从「contain + 毛玻璃衬底」改成「cover 裁切」：
+   照片按格子大小裁切铺满，不再有留白/虚化衬底；底部渐变与地名保留。
+   原 .pw__back（同图放大 + blur 铺底）已连 DOM 一起删除（poster.js paintFace），
+   每块还省掉一次同图请求。错配裁切由 pickNext 的按朝向挑图兜底。
+   **别把 contain / .pw__back 加回来**——留白版用户已明确弃用。 */
 .pw__face + .pw__face { transform: rotateY(180deg); }
 
-/* 照片容器：只放前景媒体，按自身比例 contain 完整显示；
-   留白处直接露出 .pw__face 的 background:var(--surface-3)（卡片底色），
-   不再铺模糊蒙版。 */
+/* 照片：cover 铺满格子（按块大小裁切，中心对齐），底部渐变浮在照片上方 */
 .pw__wrap {
   position: absolute; inset: 0;
   z-index: 1;
@@ -167,7 +154,8 @@
 .pw__media {
   position: relative;
   width: 100%; height: 100%;
-  object-fit: contain;              /* 按自身比例完整显示，不硬裁 */
+  object-fit: cover;                /* 2026-10-28 方案A：按格子裁切铺满 */
+  object-position: center;
   display: block;
   opacity: 0;
   transition: opacity var(--dur-fast, .2s) var(--ease);
@@ -190,12 +178,14 @@
   line-height: 1.35;
   display: flex; align-items: baseline; gap: 6px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .45);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
   z-index: 3;
+  /* 窄块里「地名 + 日期」常超宽。省略号必须落在 flex 子项上：容器 flex + 子项
+     min-width:0 才能让 text-overflow 生效（只在容器上设 nowrap 是无效的，
+     之前就因此被右边缘硬切断）。地名优先收缩省略，日期保持完整不缩。 */
 }
-.pw__meta b { font-weight: 600; }
-.pw__meta span { color: rgba(255, 255, 255, .78); font-size: var(--fs-xs); }
+.pw__meta b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw__meta span { color: rgba(255, 255, 255, .78); font-size: var(--fs-xs); flex-shrink: 0; }
 
 /* 视频角标：视频不播放，只取首帧，用角标区分 */
 .pw__play {
