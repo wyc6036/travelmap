@@ -2264,8 +2264,33 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
   let layout = loadLayout() || DEFAULT_LAYOUT.map((s) => ({ ...s }));
   let editing = false;
   let slots = [];
+  let addEl = null;        // 网格末尾的「＋ 添加模块」瓦片（每次 buildGrid 重建）
   let dragMoved = false;   // 刚结束拖拽时为 true，避免拖完组件后的点击被当成"点空白保存"
   let sortable = null;
+
+  /* 模块在首页上的唯一性：一个模块只能出现一次。
+     layout 是唯一权威（含 DOM 反推来的最新状态），因此「已占用」= layout 里的 type 集合；
+     已占用的不再进待选列表，移除后自动回到列表。
+     注意：替换场景不需要给目标开例外 —— 目标本身就占用着那一格，
+     所以它天然不会出现在「未占用」列表里（早期版本给它开了例外，反而让它自己列了出来）。 */
+  function usedTypes() {
+    return new Set(layout.map((s) => s.type));
+  }
+  function availableTypes() {
+    const used = usedTypes();
+    return Object.keys(WIDGET_DEFS).filter((t) => !used.has(t));
+  }
+  /* 「＋ 添加模块」瓦片状态：还有剩余模块才可点；全加满则保留瓦片但置灰不可点
+     （入口不隐藏，避免用户以为功能消失）。 */
+  function refreshAddTile() {
+    if (!addEl) return;
+    const depleted = availableTypes().length === 0;
+    addEl.disabled = depleted;
+    addEl.classList.toggle('is-depleted', depleted);
+    addEl.title = depleted ? '所有模块都已在主页上，移除某个模块后可再次添加' : '添加模块';
+    const label = addEl.querySelector('span');
+    if (label) label.textContent = depleted ? '已全部添加' : '添加模块';
+  }
 
   function loadLayout() {
     try {
@@ -2334,12 +2359,13 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     /* 网格末尾的「＋ 添加模块」：只在编辑态露出（显隐交给 CSS），
        是 openWidgetSheet(null) 的唯一入口 —— 此前只有卡片上的「替换」能打开那个弹窗，
        于是一旦把模块移除就再也加不回来。它不是 .widget，所以不参与拖拽，也不进布局。 */
-    const addEl = document.createElement('button');
+    addEl = document.createElement('button');
     addEl.type = 'button';
     addEl.className = 'widget-add';
     addEl.innerHTML = `${icon('plus', 'ico')}<span>添加模块</span>`;
     addEl.addEventListener('click', (e) => { e.stopPropagation(); openWidgetSheet(null); });
     gridEl.append(addEl);
+    refreshAddTile();   // 全部模块都在首页时置灰不可点
 
     if (editing) enterEditVisual();
   }
@@ -2353,10 +2379,12 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     if (rec.api && rec.api.destroy) rec.api.destroy();
     slots = slots.filter((s) => s !== rec);
     syncLayoutFromDom();
+    refreshAddTile();   // 释放出来的模块回到待选列表，瓦片重新可用
   }
   function addSlot(type = 'recent', size) {
     const def = WIDGET_DEFS[type];
     if (!def) return;
+    if (usedTypes().has(type)) { toast('该模块已在主页上'); return; }  // 兜底：同一模块只允许一个
     layout.push({ type, size: size || def.defaultSize });
     buildGrid();
     renderHome();
@@ -2423,20 +2451,33 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     setTimeout(() => document.addEventListener('click', closeWidgetMenus, { once: true }), 0);
   }
 
-  /* 替换 / 新增 底部弹窗（列出全部组件） */
+  /* 替换 / 新增 底部弹窗（只列出尚未上首页的组件） */
   const sheet = document.getElementById('tm-widget-sheet');
   const sheetMask = document.getElementById('tm-widget-sheet-mask');
   const sheetBody = document.getElementById('tm-widget-sheet-body');
   const sheetTitle = document.getElementById('tm-widget-sheet-title');
   let sheetTarget = null; // 替换目标 rec；为 null 表示新增
 
-  function openWidgetSheet(rec) {
-    sheetTarget = rec || null;
-    sheetTitle.textContent = rec ? '替换组件' : '新增组件';
-    sheetBody.innerHTML = Object.entries(WIDGET_DEFS).map(([type, def]) => `
+  /* 替换 / 新增 共用的列表渲染：
+     - 已添加到首页的模块不出现在列表里（严格按需求），因此每项都是「真正可选」的。
+     - 替换时目标同样不在列表里（它正占用着那一格），标题写成「替换「最近一次旅行」」交代当前对象。
+     - 列表可能为空（默认布局就把 8 个模块全用上了），此时给空态说明怎么解除。 */
+  function renderSheetList(rec) {
+    syncLayoutFromDom();   // 以 DOM 为准，避免拖拽 / 替换后 layout 落后一拍
+    const types = availableTypes();
+    if (!types.length) {
+      const total = Object.keys(WIDGET_DEFS).length;
+      sheetBody.innerHTML = `<p class="wj-sheet__empty">${
+        rec
+          ? `没有其他可替换的模块 —— ${total} 个模块都已在主页上。<br>先移除某个模块，再来替换。`
+          : `${total} 个模块都已在主页上。<br>移除某个模块后，它会重新出现在这里。`
+      }</p>`;
+      return;
+    }
+    sheetBody.innerHTML = types.map((type) => `
       <button type="button" class="wj-sheet__item" data-type="${type}">
-        <span class="wj-sheet__name">${def.title}</span>
-        <span class="wj-sheet__size">${def.defaultSize}</span>
+        <span class="wj-sheet__name">${WIDGET_DEFS[type].title}</span>
+        <span class="wj-sheet__size">${WIDGET_DEFS[type].defaultSize}</span>
       </button>`).join('');
     sheetBody.querySelectorAll('button[data-type]').forEach((b) => {
       b.addEventListener('click', () => {
@@ -2456,9 +2497,17 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           addSlot(type);
         }
         syncLayoutFromDom();
+        refreshAddTile();   // 替换后旧模块被释放，瓦片可能从置灰恢复
         closeWidgetSheet();
       });
     });
+  }
+
+  function openWidgetSheet(rec) {
+    sheetTarget = rec || null;
+    const targetDef = rec ? WIDGET_DEFS[rec.type] : null;
+    sheetTitle.textContent = rec ? `替换「${targetDef ? targetDef.title : '组件'}」` : '新增组件';
+    renderSheetList(rec);
     sheet.hidden = false; sheetMask.hidden = false;
     requestAnimationFrame(() => sheet.classList.add('is-open'));
   }

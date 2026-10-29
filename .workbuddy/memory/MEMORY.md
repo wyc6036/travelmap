@@ -11,6 +11,7 @@
 
 ## 首页小组件（iOS 磁贴）
 - 尺寸离散 1x1/2x1/1x2/2x2/3x2；**8 个组件全部可用**（recent/wishlist/collections/poster + pending/lastTrip/roulette/month）+ 编辑态（拖拽/尺寸/替换/移除/重置布局，`travelmap.layout.v1`）；`comingSoon` 机制已整体删除，别再引入占位。
+- **模块唯一性（2026-10-29 固化）**：一个模块只能上一次首页。`usedTypes()/availableTypes()` 以 `layout` 为唯一权威；弹窗只列未占用项，空列表给 `.wj-sheet__empty` 文案；`addSlot()` 有唯一性兜底；「＋ 添加模块」瓦片在 8 个全占用时 `disabled` + `.is-depleted`（置灰不隐藏，文案「已全部添加」），由 `refreshAddTile()` 在 buildGrid/removeSlot/替换后同步。**替换面板不要给目标开 exclude 例外**（开了它就会列进自己的替换列表）。`DEFAULT_LAYOUT` 正好用满 8 个 → 默认状态下新增/替换列表为空是常态，不是 bug。
 - 网格末尾 `.widget-add`（虚线瓦片，仅编辑态显示）是 `openWidgetSheet(null)`「新增组件」的唯一入口；它刻意不是 `.widget`（不进 layout / 不被 Sortable 抓），「点空白保存」的排除名单里有它。
 - `pending` 的「未归类照片」不在 `/api/data`（`place_id` 为空），走 `GET /api/media/pending` + `api.pendingMedia()`，前端 60s TTL 缓存；「缺日期」条目依赖 `createUI({ onEditPlace })`（main.js → `addPlace.edit`）。
 - 坑：`month` 必须用 `getUTCMonth()`（`dateTs` 来自 `Date.UTC()`）；柱高百分比要套一层 `.mon__track`，否则会顶掉月份标签。

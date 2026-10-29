@@ -104,6 +104,12 @@
 .wj-sheet__item:hover { border-color: var(--primary-ink); }
 .wj-sheet__name { font-size: 14px; font-weight: 500; color: var(--ink); }
 .wj-sheet__size { font-size: 12px; color: var(--ink-2); }
+/* 没有可选模块时的占位说明（已添加到主页的模块不再出现在列表里，
+   默认布局会把 8 个模块全用上 → 这里必须交代怎么解除） */
+.wj-sheet__empty {
+  grid-column: 1 / -1; margin: 0; padding: 22px 10px;
+  text-align: center; font-size: 13px; line-height: 1.8; color: var(--ink-3);
+}
 
 /* =========================================================
    「＋ 添加模块」瓦片
@@ -125,6 +131,12 @@
 .grid--main.is-editing .widget-add { display: flex; }
 .widget-add:hover { color: var(--primary-ink); border-color: var(--primary); background: var(--primary-tint); }
 .widget-add .ico { width: 18px; height: 18px; }
+/* 全部模块都已在主页：瓦片保留可见但置灰不可点（文案由 JS 改成「已全部添加」） */
+.grid--main.is-editing .widget-add.is-depleted,
+.widget-add.is-depleted:hover {
+  color: var(--ink-3); border-color: var(--line-soft);
+  background: transparent; opacity: .55; cursor: not-allowed;
+}
 
 /* =========================================================
    小组件：待整理照片（1×1）
