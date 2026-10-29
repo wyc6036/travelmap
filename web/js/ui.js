@@ -25,7 +25,7 @@ import { MEDIA_LABELS, VIEW_META, COLORS, regionLabel } from './config.js';
 import { api } from './api.js';
 import { CITIES } from './cities.js';
 import {
-  escapeHtml, formatDateDot, formatDateRange, countUp, toast, parseDate,
+  escapeHtml, formatDateDot, formatDateRange, countUp, toast, parseDate, debounce,
 } from './utils.js';
 /* 统计页拆到独立模块（内容多、且几乎全是自绘图表，混在本文件里不好维护）。
    这里只做"注入依赖 + 桥接事件"，图表本身一行都不在 ui.js 里。 */
@@ -83,8 +83,10 @@ function mediaCard(item, place, { onOpen, showPlace = true }) {
   return btn;
 }
 
-/** 地点卡（用于「最近足迹」条带与愿望清单） */
-function placeCard(place, { onOpen }) {
+/** 地点卡（用于「最近足迹」条带与愿望清单）
+ *  opts.badge: 'total' 时角标改成「记录总数」（默认只标视频数）——
+ *  首页磁贴空间紧张，一张卡只说得出一个数，说总数比只说视频有用。 */
+function placeCard(place, { onOpen, badge = 'video' }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'mcard';
@@ -97,11 +99,15 @@ function placeCard(place, { onOpen }) {
     || (media.find((m) => m.type === 'video') || {}).url
     || '';
   const cover = realCover || place.cover || './assets/sidebar-art.svg';
+  const total = place.mediaCount ? place.mediaCount.total : 0;
+  const countBadge = badge === 'total' && total
+    ? `<span class="mcard__badge">${icon('image', 'ico ico--sm')}${total}</span>`
+    : (place.mediaCount.video ? `<span class="mcard__badge">${icon('video', 'ico ico--sm')}${place.mediaCount.video}</span>` : '');
   btn.innerHTML = `
     <div class="mcard__media">
       <img src="${escapeHtml(cover)}" alt="${escapeHtml(place.name)}"
            loading="lazy" decoding="async" referrerpolicy="no-referrer" />
-      ${place.mediaCount.video ? `<span class="mcard__badge">${icon('video', 'ico ico--sm')}${place.mediaCount.video}</span>` : ''}
+      ${countBadge}
     </div>
     <div class="mcard__meta">
       <p class="mcard__name">${escapeHtml(place.name)}</p>
@@ -325,45 +331,70 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     };
   }
 
-  /* ---------- 地图视图下半区（Widget 用：接收目标容器） ---------- */
+  /* ---------- 首页「最近足迹」磁贴的填充（只服务 widget，别处不用） ----------
+     按容器**实测高度**逐张试插、放不下就回退：
+     2×1 只能容一行 4 张，旧实现固定塞 6 张会把第二行裁掉半截（溢出 148px）；
+     620px 窄屏 .mediagrid 变 2 列，溢出更是到 800px 以上。这样任何尺寸/列数自洽。
+     也刻意不再往磁贴里塞「添加新足迹」瓦片 —— 它会把第 5 张卡挤到第二行，
+     而新增足迹的入口顶栏本来就有。 */
   function paintRecent(grid, mediaFilter = 'all') {
     if (!grid) return;
     grid.innerHTML = '';
     const stats = computeStats();
 
+    const makers = [];
     if (mediaFilter === 'all') {
-      stats.past.slice(0, 6).forEach((p) => grid.append(placeCard(p, { onOpen: onOpenDetail })));
+      stats.past.slice(0, 8).forEach((p) => makers.push(() => placeCard(p, { onOpen: onOpenDetail, badge: 'total' })));
     } else {
       const items = [];
       for (const p of stats.past) {
         for (const m of p.media) if (m.type === mediaFilter) items.push({ p, m });
       }
-      items.slice(0, 6).forEach(({ p, m }) => grid.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
+      items.slice(0, 8).forEach(({ p, m }) => makers.push(() => mediaCard(m, p, { onOpen: onOpenPhoto })));
       if (!items.length) {
         grid.innerHTML = emptyState(`还没有${MEDIA_LABELS[mediaFilter]}`, '打开地点详情，用「添加媒体」上传即可');
+        return;
       }
     }
 
-    /* 与顶栏「新增」共用同一入口：main.js 把 onAddPlace 接到 addPlace.open()（新增/编辑足迹弹窗）。
-       ⚠️ 这里曾是前端壳子时代的演示 toast（"改 places.json 即可"），后端化之后忘了换，别再回退。 */
-    grid.append(addTile(
-      '添加新足迹',
-      '点亮更多地方',
-      () => (typeof onAddPlace === 'function' ? onAddPlace() : toast('新增足迹功能未就绪', 2600)),
-    ));
+    const maxH = grid.clientHeight;
+    let placed = 0;
+    for (const make of makers) {
+      const el = make();
+      grid.append(el);
+      if (maxH > 0 && grid.scrollHeight > maxH + 2) {
+        el.remove();
+        /* 一张都放不下（卡片被拉得很宽/容器特别矮）：宁可让卡体内部可滚动，
+           也不要交出一整片空白 —— 空白的磁贴比滚动条更像出错。 */
+        if (!placed) grid.append(make());
+        break;
+      }
+      placed += 1;
+    }
   }
 
   /* ---------- 旅途海报的素材池 ----------
      全部地点里的照片 + 视频（笔记没有画面，不进池）。
      ⚠️ 每条都要带上 place：点某一块要能直接开到那个地点。
      ⚠️ 视频优先用 poster 封面（有封面就完全不用加载视频文件），
-        没有封面的才交给 js/poster.js 用 <video> 取首帧。 */
-  function posterPool() {
+        没有封面的才交给 js/poster.js 用 <video> 取首帧。
+     ⚠️ 按地点配平 + 轮次交错（2026-10-29）：一趟旅行可能贡献 130 张，
+        纯随机下去整面墙 8/10 块都是同一个地方（"主题重复"）。现在每个地点
+        **均匀采样**最多 4 张，再按轮次交叉排出，邻块天然来自不同地点。 */
+  const POSTER_PER_PLACE = 4;
+  function posterSample(list, n) {
+    if (list.length <= n) return list.slice();
     const out = [];
+    for (let i = 0; i < n; i += 1) out.push(list[Math.round((i * (list.length - 1)) / (n - 1))]);
+    return out;
+  }
+  function posterPool() {
+    const groups = [];
     (state?.places || []).forEach((p) => {
+      const items = [];
       p.media.forEach((m) => {
         if (m.type !== 'image' && m.type !== 'video') return;
-        out.push({
+        items.push({
           kind: m.type,
           src: m.url,
           poster: m.type === 'video' ? (m.poster || '') : '',
@@ -373,7 +404,12 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           sub: p.date ? formatDateRange(p.date, p.endDate) : (p.countryZh || ''),
         });
       });
+      if (items.length) groups.push(posterSample(items, POSTER_PER_PLACE));
     });
+    const out = [];
+    for (let round = 0; round < POSTER_PER_PLACE; round += 1) {
+      groups.forEach((g) => { if (g[round]) out.push(g[round]); });
+    }
     return out;
   }
 
@@ -1857,11 +1893,16 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       });
     });
     const unassigned = Number.isFinite(remoteCount) && remoteCount > 0 ? remoteCount : 0;
+    /* 每一桶顺手带一张"代表图"：卡片里只有数字太干，给一张缩略图
+       才能让人认出"哦是那批照片"。未归类照片只有后端计数、拿不到具体文件，故无图。 */
+    const coverOf = (p) => (p && p.media && p.media.length ? mediaThumb(p.media[0]) : (p && p.cover) || '');
     return {
       unassigned,
       noTime: noTime.length,
+      noTimeThumb: noTime[0] ? mediaThumb(noTime[0].media) : '',
       noTimePlace: noTime[0] ? noTime[0].place : null,
       noDate: noDate.length,
+      noDateThumb: coverOf(noDate[0]),
       noDatePlace: noDate[0] || null,
       total: unassigned + noTime.length + noDate.length,
     };
@@ -1914,6 +1955,11 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         return { update() { paintRecent(body, w.activeMedia); } };
       },
     },
+    /* ---------- 愿望清单（1×1）：不再是一排缩小版的足迹卡 ----------
+       原来和「最近足迹」用同一个 placeCard 横向条带，1×1 里只露 1.6 张、
+       而且"想去"和"去过"长得一模一样。现在改成心愿卡：
+       封面 + 想去/已去角标 + 名字 + 国家（含目标的补目标季）+ 优先级星，
+       底部给「待出发 / 已实现」的进度。容量按实测高度自适应。 */
     wishlist: {
       title: '愿望清单', defaultSize: '1x1',
       mount(head, body) {
@@ -1922,19 +1968,76 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           <button class="link" data-view="wishlist">查看全部 <span class="muted" data-role="total">(0)</span>
             <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
           </button>`;
-        body.classList.add('strip');
+        body.classList.add('wg');
         head.querySelector('[data-view="wishlist"]').addEventListener('click', () => setView('wishlist'));
+        const totalEl = head.querySelector('[data-role="total"]');
+
+        const wcard = (p) => {
+          const a = annOf(p.id);
+          const done = wishDone(p);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `wcard ${done ? 'wcard--done' : 'wcard--want'}`;
+          const img0 = (p.media || []).find((m) => m.type === 'image') || {};
+          const cover = img0.thumb_url || img0.url || p.cover || './assets/sidebar-art.svg';
+          /* 国家优先：city 常常就是地点名本身（"西雅图 · 西雅图"重复过一版） */
+          const where = p.countryZh || p.country || p.city || p.type || '';
+          const extra = done
+            ? (p.date ? formatDateDot(p.date) : '')
+            : (a.target && a.target !== '未定' ? a.target : '');
+          const sub = [where, extra].filter(Boolean).join(' · ');
+          const pri = Number(a.priority) || 0;
+          btn.innerHTML = `
+            <span class="wcard__media">
+              <img src="${escapeHtml(cover)}" alt="${escapeHtml(p.name)}"
+                   loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+              <span class="wcard__tag">${done ? '已去' : '想去'}</span>
+              ${pri > 0 ? `<span class="wcard__star" title="优先级 ${pri}">${'★'.repeat(Math.min(3, pri))}</span>` : ''}
+            </span>
+            <span class="wcard__name">${escapeHtml(p.name)}</span>
+            ${sub ? `<span class="wcard__sub">${escapeHtml(sub)}</span>` : ''}`;
+          const img = btn.querySelector('img');
+          img?.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; }, { once: true });
+          btn.addEventListener('click', () => onOpenDetail?.(p));
+          return btn;
+        };
+
         return {
           update() {
             const wish = wishlistPlaces();
+            totalEl.textContent = `(${wish.length})`;
             body.innerHTML = '';
-            wish.slice(0, 6).forEach((p) => body.append(placeCard(p, { onOpen: onOpenDetail })));
-            if (!wish.length) body.innerHTML = emptyState('愿望清单是空的', '点上方「+ 添加心愿」，新建或挑一个想去的地方');
-            head.querySelector('[data-role="total"]').textContent = `(${wish.length})`;
+            if (!wish.length) {
+              body.innerHTML = emptyState('愿望清单是空的', '点上方「+ 添加心愿」，新建或挑一个想去的地方');
+              return;
+            }
+            const grid = document.createElement('div');
+            grid.className = 'wg__grid';
+            body.append(grid);
+            /* 先放页脚再逐张试插：容器高度随时可由用户改尺寸/换列数，
+               用「塞不下就退回」比固定塞 6 张稳（旧版同款问题见 paintRecent）。 */
+            const st = wishStats(wish);
+            const foot = document.createElement('div');
+            foot.className = 'wg__foot';
+            foot.innerHTML = `
+              <span>待出发 <b>${st.active}</b></span>
+              <span>已实现 <b>${st.done}</b></span>
+              <span class="wg__bar"><i style="width:${st.pct}%"></i></span>`;
+            body.append(foot);
+            for (const p of wish) {
+              const el = wcard(p);
+              grid.append(el);
+              if (body.scrollHeight > body.clientHeight + 2) { el.remove(); break; }
+            }
           },
         };
       },
     },
+    /* ---------- 我的记录（1×1）：从「图片墙」改成「记录概览」 ----------
+       旧版和「最近足迹」一样是横向图片条带，而它按 stats.past 铺开所有媒体，
+       前 6 张常常是同一个地点的连拍（九寨沟 ×3），150 份记录只露出 2 张。
+       现在讲的是"积累了多少"：总数 + 图/视频/笔记构成 + 最近一条。
+       —— 与「最近足迹」（最近去了哪）分工，不再重复。 */
     collections: {
       title: '我的记录', defaultSize: '1x1',
       mount(head, body) {
@@ -1943,17 +2046,85 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           <button class="link" data-view="collections">查看全部 <span class="muted" data-role="total">(0)</span>
             <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
           </button>`;
-        body.classList.add('strip');
+        body.classList.add('cl');
         head.querySelector('[data-view="collections"]').addEventListener('click', () => setView('collections'));
+        const totalEl = head.querySelector('[data-role="total"]');
+
         return {
           update() {
             const stats = computeStats();
-            const pool = [];
-            for (const p of stats.past) for (const m of p.media) pool.push({ p, m });
+            const m = stats.media;
+            totalEl.textContent = `(${m.total})`;
             body.innerHTML = '';
-            pool.slice(0, 6).forEach(({ p, m }) => body.append(mediaCard(m, p, { onOpen: onOpenPhoto })));
-            if (!pool.length) body.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里');
-            head.querySelector('[data-role="total"]').textContent = `(${stats.media.total})`;
+            if (!m.total) { body.innerHTML = emptyState('暂无记录', '媒体资料会出现在这里'); return; }
+
+            const pool = [];
+            for (const p of stats.past) for (const it of p.media) pool.push({ p, it });
+            const places = new Set(pool.map((x) => x.p.id)).size;
+            const pct = (n) => (m.total ? (n / m.total) * 100 : 0);
+
+            body.innerHTML = `
+              <div class="cl__sum"><b>${m.total}</b><span>份记录</span>
+                <span class="cl__cover">覆盖 ${places} 个地点</span></div>
+              <div class="cl__mix">
+                <i class="is-img" style="width:${pct(m.image)}%"></i>
+                <i class="is-vid" style="width:${pct(m.video)}%"></i>
+                <i class="is-txt" style="width:${pct(m.text)}%"></i>
+              </div>
+              <div class="cl__legend">
+                <span><i style="background:var(--c1)"></i>照片 <b>${m.image}</b></span>
+                <span><i style="background:var(--c4)"></i>视频 <b>${m.video}</b></span>
+                <span><i style="background:var(--c2)"></i>笔记 <b>${m.text}</b></span>
+              </div>
+              <div class="cl__latest"></div>`;
+
+            /* 最近一条：最近一次落地地点里的第一份记录（stats.past 已按日期倒序）。
+               点它直接开到那张图，而不是再跳一次「查看全部」。 */
+            const p0 = stats.past.find((p) => p.media && p.media.length);
+            const latestSlot = body.querySelector('.cl__latest');
+
+            /* 被拉到 2×2 这类大尺寸时，上面那点内容只占 1/3，下面是整片空白。
+               补一块「按地点分布」排行榜，行高用 flex 等分剩余空间 ——
+               行数固定 8，卡片越高每行越舒展，不用为每个尺寸写一套规则。 */
+            if (body.clientHeight >= 300) {
+              const byPlace = stats.past
+                .filter((p) => p.media && p.media.length)
+                .map((p) => ({ p, n: p.media.length }))
+                .sort((a, b) => b.n - a.n)
+                .slice(0, 8);
+              if (byPlace.length > 1) {
+                const list = document.createElement('div');
+                list.className = 'cl__places';
+                const peak = byPlace[0].n || 1;
+                byPlace.forEach(({ p, n }) => {
+                  const row = document.createElement('button');
+                  row.type = 'button';
+                  row.className = 'cl__place';
+                  row.innerHTML = `<b>${n}</b><span class="cl__pname">${escapeHtml(p.name)}</span>
+                    <span class="cl__pbar"><i style="width:${Math.round((n / peak) * 100)}%"></i></span>`;
+                  row.addEventListener('click', () => onOpenDetail?.(p));
+                  list.append(row);
+                });
+                body.insertBefore(list, latestSlot);
+              }
+            }
+
+            if (!p0) return;
+            const it0 = p0.media[0];
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'cl__latest';
+            btn.innerHTML = `
+              <img src="${escapeHtml(mediaThumb(it0))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+              <span class="cl__latest-main">
+                <span class="cl__latest-name">${escapeHtml(p0.name)}</span>
+                <span class="cl__latest-sub">最近一条 · ${escapeHtml(p0.date ? formatDateDot(p0.date) : (MEDIA_LABELS[it0.type] || '记录'))}</span>
+              </span>
+              <svg class="ico ico--sm" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>`;
+            const img = btn.querySelector('img');
+            img?.addEventListener('error', () => { img.src = './assets/sidebar-art.svg'; }, { once: true });
+            btn.addEventListener('click', () => onOpenPhoto?.(p0, it0));
+            body.querySelector('.cl__latest').replaceWith(btn);
           },
         };
       },
@@ -1962,7 +2133,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       title: '旅途海报', defaultSize: '2x2',
       mount(head, body) {
         head.innerHTML = `
-          <h3 class="card__title">旅途海报</h3>
+          <h3 class="card__title">旅途海报 <span class="muted" data-role="sum"></span></h3>
           <div class="card__actions">
             <button class="btn btn--pill" data-role="shuffle">换一批</button>
             <button class="link" data-view="collections">查看全部 <span class="muted" data-role="total">(0)</span>
@@ -1975,9 +2146,13 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         head.querySelector('[data-view="collections"]').addEventListener('click', () => setView('collections'));
         return {
           update() {
-            posterApi.setMedia(posterPool());
+            const pool = posterPool();
+            posterApi.setMedia(pool);
             const stats = computeStats();
             head.querySelector('[data-role="total"]').textContent = `(${stats.media.total})`;
+            /* 图墙只看图会"不知道自己在看什么"，补一句口径：覆盖几地、几张可看 */
+            const places = new Set(pool.map((it) => it.place && it.place.id)).size;
+            head.querySelector('[data-role="sum"]').textContent = pool.length ? `${places} 地 · ${pool.length} 张` : '';
           },
           destroy() { posterApi.destroy(); },
         };
@@ -2013,9 +2188,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
              否则整理掉一项后卡片高度/条目顺序都会跳，像是抽掉了什么。
              未归类照片要走一次后端，数据没到手前那行显示「·」而不是 0（0 会是假话）。 */
           const rows = [
-            { label: '未归类照片', n: pendingRemote.count === null ? null : b.unassigned, c: 'var(--c1)', on: goArchive },
-            { label: '缺拍摄时间', n: b.noTime, c: 'var(--c4)', on: () => b.noTimePlace && onOpenDetail?.(b.noTimePlace) },
-            { label: '缺日期', n: b.noDate, c: 'var(--c2)', on: () => {
+            { label: '未归类照片', n: pendingRemote.count === null ? null : b.unassigned, thumb: '', c: 'var(--c1)', on: goArchive },
+            { label: '缺拍摄时间', n: b.noTime, thumb: b.noTimeThumb, c: 'var(--c4)', on: () => b.noTimePlace && onOpenDetail?.(b.noTimePlace) },
+            { label: '缺日期', n: b.noDate, thumb: b.noDateThumb, c: 'var(--c2)', on: () => {
               if (!b.noDatePlace) return;
               if (typeof onEditPlace === 'function') onEditPlace(b.noDatePlace);
               else onOpenDetail?.(b.noDatePlace);
@@ -2030,9 +2205,17 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
             btn.className = `pnd__row${r.n ? '' : ' is-zero'}`;
             btn.style.setProperty('--c', r.c);
             btn.title = r.label;
-            btn.innerHTML = `<span class="pnd__dot"></span><span class="pnd__label">${r.label}</span>`
+            btn.innerHTML = `${r.thumb
+              ? `<img class="pnd__thumb" src="${escapeHtml(r.thumb)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`
+              : '<span class="pnd__dot"></span>'}
+              <span class="pnd__label">${r.label}</span>`
               + `<b class="pnd__n">${r.n === null ? '·' : r.n}</b>`
               + `<svg class="ico ico--sm pnd__arrow" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>`;
+            /* 缩略图挂了就退回小色点，别留一个灰方块 */
+            const im = btn.querySelector('.pnd__thumb');
+            im?.addEventListener('error', () => {
+              im.replaceWith(Object.assign(document.createElement('span'), { className: 'pnd__dot', style: `--c:${r.c}` }));
+            }, { once: true });
             btn.addEventListener('click', r.on);
             list.append(btn);
           });
@@ -2067,6 +2250,19 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           if (info.target) onOpenDetail?.(info.target);
         };
 
+        /* 距今多久：「2026.10.01 - 03」说的是什么时候，但看首页的人想知道
+           "这趟过去多久了"。只服务这张卡，放在组件区内。 */
+        const agoText = (endDate, fallbackDate) => {
+          const ts = parseDate(endDate).ts || parseDate(fallbackDate).ts;
+          if (!ts) return '';
+          const d = Math.floor((Date.now() - ts) / 86400000);
+          if (d <= 0) return '进行中';
+          if (d === 1) return '昨天结束';
+          if (d < 30) return `${d} 天前`;
+          if (d < 365) return `${Math.floor(d / 30)} 个月前`;
+          return `${Math.floor(d / 365)} 年前`;
+        };
+
         return {
           update() {
             const info = lastTripInfo();
@@ -2090,12 +2286,14 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
                 <span class="lt__tag">${info.kind === 'trip' ? '行程' : '足迹'}</span>
               </div>
               <div class="lt__info">
-                <p class="lt__when">${escapeHtml(when)}</p>
+                <p class="lt__when">${escapeHtml(when)}${
+                  agoText(info.endDate, info.date) ? `<span class="lt__ago">${escapeHtml(agoText(info.endDate, info.date))}</span>` : ''
+                }</p>
                 <p class="lt__name">${escapeHtml(info.name)}</p>
                 <div class="lt__stats">
-                  <span><b>${info.days}</b> 天</span>
-                  <span><b>${info.placeCount}</b> 个地点</span>
-                  <span><b>${info.mediaCount}</b> 份记录</span>
+                  <span><b>${info.days}</b><i>天</i></span>
+                  <span><b>${info.placeCount}</b><i>个地点</i></span>
+                  <span><b>${info.mediaCount}</b><i>份记录</i></span>
                 </div>
                 ${stops ? `<p class="lt__stops" title="${escapeHtml(names.join(' → '))}">${escapeHtml(stops)}</p>` : ''}
               </div>
@@ -2123,6 +2321,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         body.classList.add('rlt');
         body.innerHTML = `
           <div class="rlt__stage">
+            <span class="rlt__thumb" data-role="thumb" aria-hidden="true"></span>
             <p class="rlt__kicker" data-role="kicker">从心愿清单里抽一签</p>
             <p class="rlt__name" data-role="name">准备好了吗</p>
             <p class="rlt__sub" data-role="sub"></p>
@@ -2134,8 +2333,32 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         const subEl = body.querySelector('[data-role="sub"]');
         const kickerEl = body.querySelector('[data-role="kicker"]');
         const goEl = body.querySelector('[data-role="go"]');
+        const thumbEl = body.querySelector('[data-role="thumb"]');
         const w = { pool: [], cur: null, idx: 0, timer: 0, spinning: false };
 
+        /* 抽中后给一个画面的落点：有照片就用该心愿的首图，没有就退化成
+           带首字的色块。未抽时留一个虚线「?」占位 —— 否则默认态只有一句话
+           加一个按钮、中间全空，而且抽中的瞬间整块会往上跳。 */
+        function paintThumb(p) {
+          thumbEl.className = 'rlt__thumb';
+          thumbEl.style.backgroundImage = '';
+          thumbEl.style.background = '';
+          thumbEl.textContent = '';
+          if (!p) {
+            thumbEl.textContent = '?';
+            thumbEl.classList.add('is-on', 'is-ph', 'is-idle');
+            return;
+          }
+          const img = (p.media || []).find((m) => m.type === 'image');
+          if (img) {
+            thumbEl.style.backgroundImage = `url("${img.thumb_url || img.url}")`;
+            thumbEl.classList.add('is-on');
+            return;
+          }
+          thumbEl.style.background = `linear-gradient(150deg, ${(state.colorOf && state.colorOf(p)) || '#9DB4CC'}, var(--surface-3))`;
+          thumbEl.textContent = String(p.name || '').slice(0, 1);
+          thumbEl.classList.add('is-on', 'is-ph');
+        }
         function resetIdle() {
           w.cur = null;
           nameEl.textContent = '准备好了吗';
@@ -2143,6 +2366,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           kickerEl.textContent = '从心愿清单里抽一签';
           goEl.textContent = '抽一签';
           goEl.disabled = false;
+          paintThumb(null);
         }
         function syncPool() {
           const all = wishlistPlaces();
@@ -2164,7 +2388,12 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           nameEl.textContent = w.cur.name;
           nameEl.classList.add('is-hit');
           kickerEl.textContent = '这一站去';
-          subEl.textContent = w.cur.countryZh || w.cur.country || w.cur.city || '点名字看详情';
+          /* 顺位 = 它在完整心愿列表里的位置（已按优先级/日期排好），
+             比单写国家更能表达"这个心愿在心里排第几"。 */
+          const rank = wishlistPlaces().indexOf(w.cur) + 1;
+          const where = w.cur.countryZh || w.cur.country || w.cur.city || '';
+          subEl.textContent = [where, rank > 0 ? `第 ${rank} 顺位` : ''].filter(Boolean).join(' · ') || '点名字看详情';
+          paintThumb(w.cur);
           goEl.textContent = '再抽一次';
           goEl.disabled = false;
         }
@@ -2176,6 +2405,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           goEl.disabled = true;
           goEl.textContent = '抽签中…';
           kickerEl.textContent = '正在摇签筒';
+          paintThumb(null);   // 摇的时候不能还挂着上一次的封面
           nameEl.classList.remove('is-hit');
           nameEl.classList.add('is-rolling');
           let remain = 18;
@@ -2198,6 +2428,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           }
           onOpenDetail?.(w.cur);
         });
+
+        paintThumb(null);   // 未抽签的初始占位（与抽中后的结构一致，不跳动）
 
         return {
           update() { if (!w.spinning) syncPool(); },
@@ -2236,14 +2468,27 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
             }
             const max = Math.max(...counts);
             const peak = counts.indexOf(max);
+            const min = Math.min(...counts);
+            const cold = counts.indexOf(min);
+            const avg = (total / 12).toFixed(1);
             body.innerHTML = `
               <p class="mon__lead">最常出发的是<b>${MONTH_NAMES[peak]}</b>
                 <span class="mon__pct">${max} 次 · ${Math.round((max / total) * 100)}%</span></p>
-              <div class="mon__bars"></div>`;
+              <div class="mon__bars"></div>
+              <p class="mon__foot">
+                <span>平均每月 <b>${avg}</b> 次</span>
+                <span>${min === max ? '每个月都有出发' : `最冷清 <b>${MONTH_NAMES[cold]}</b>${min ? `（${min} 次）` : ''}`}</span>
+              </p>`;
             const bars = body.querySelector('.mon__bars');
+            /* 柱子按季节上色（春/夏/秋/冬，取现有国家色系，不新造颜色）：
+               12 根柱里常年只有 3~4 根有值，纯灰的空轨道看不出"一年是什么节奏"。
+               零值柱改画 2px 基线（CSS 里覆盖内联高度），月份轴才完整。 */
+            const seasonOf = (i) => (i >= 2 && i <= 4 ? 'spring'
+              : i >= 5 && i <= 7 ? 'summer'
+              : i >= 8 && i <= 10 ? 'autumn' : 'winter');
             counts.forEach((n, i) => {
               const col = document.createElement('div');
-              col.className = `mon__col${i === peak ? ' is-peak' : ''}${n ? '' : ' is-zero'}`;
+              col.className = `mon__col is-${seasonOf(i)}${i === peak ? ' is-peak' : ''}${n ? '' : ' is-zero'}`;
               col.title = `${MONTH_NAMES[i]} · ${n} 次`;
               /* 柱高按「该月次数 / 最高月」的百分比写在柱子上，柱子外面必须有一层
                  .mon__track 兜住底部对齐 —— 直接给 .mon__col 百分比会让柱子按
@@ -2563,8 +2808,14 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     exitEdit();   // 内部会 persistLayout() 落盘
   });
 
-  // 列数变化（响应式）时重新 clamp 尺寸，保证不溢出
-  window.addEventListener('resize', () => { slots.forEach((s) => applySize(s)); });
+  // 列数变化（响应式）时重新 clamp 尺寸，保证不溢出。
+  // ⚠️ 还要重排内容：几个模块是按「当前容器能放下多少」渲染的（最近足迹逐张试插、
+  //    愿望清单同款），只改 --w/--h 不重排的话，窄屏下会留着宽屏算出的张数被裁掉。
+  const reflowWidgets = debounce(() => {
+    slots.forEach((s) => applySize(s));
+    renderHome();
+  }, 180);
+  window.addEventListener('resize', reflowWidgets);
 
   // 首次构建网格：即使还没数据，也先摆出空态卡片；数据到达后 renderHome 填充
   buildGrid();

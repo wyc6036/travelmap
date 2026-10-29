@@ -227,9 +227,11 @@
   .statcard { padding: 11px 14px 12px; gap: 2px; }
   .statcard .legend { margin-top: 8px; padding: 5px 9px; }
 
-  /* 「最近足迹」卡片窄屏排 2 列：卡宽只剩通栏的一半不到，
-     4 列会把每张缩略图压到 100px 以下。2 列正好铺满整行。
+  /* 「最近足迹」在窄屏不再硬排 2 列（2026-10-29）：
+     原来 ≤1200px 一律 repeat(2, 1fr)，但 620px 下模块是**通栏满宽**，
+     2 列会把每张卡拉到 274px 宽、图高 205px，整体高过 1×1 卡体（193px），
+     结果一张都放不下、卡体全空。交回 .mediagrid 的 auto-fill（minmax 126px）：
+     291px → 2 列、560px → 3 列、596px → 4 列，都能落在卡体里。
      ⚠️ 别用 repeat(auto-fit, minmax(126px, 240px))：max 是确定值时，
      自动重复次数按 max 算，592px 的卡只会排到 2 条 240 的轨道、右边空一截。 */
-  .widget[data-type="recent"] .mediagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

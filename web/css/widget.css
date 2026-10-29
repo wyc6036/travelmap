@@ -165,6 +165,11 @@
   background: var(--c, var(--primary));
 }
 .pnd__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 每桶一张代表图：只有数字的清单认不出是哪批照片 */
+.pnd__thumb {
+  flex: none; width: 22px; height: 22px; border-radius: 6px;
+  object-fit: cover; background: var(--surface-3); box-shadow: var(--sh-1);
+}
 .pnd__n { font-size: var(--fs-md); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .pnd__arrow { width: 13px; height: 13px; color: var(--ink-3); opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
 .pnd__row:hover .pnd__arrow { opacity: 1; }
@@ -188,16 +193,30 @@
 }
 .lt__info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
 .lt__when {
+  display: flex; align-items: center; gap: 8px;
   font-size: var(--fs-xs); color: var(--ink-3);
   font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+/* 「多久以前」用一枚淡色小胶囊另起一格，和日期区间区分开 */
+.lt__ago {
+  padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--bg-warm); color: var(--ink-2); font-size: 10px;
 }
 .lt__name {
   font-size: var(--fs-xl); font-weight: 700; color: var(--ink); line-height: 1.25;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.lt__stats { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
-.lt__stats span { font-size: var(--fs-xs); color: var(--ink-2); }
-.lt__stats b { font-size: var(--fs-md); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 三个数字改成「数字在上、单位在下」的小数据块 + 竖分隔：
+   原来是一行小字，2×1 宽卡右侧会留一大片空，撑不起来 */
+.lt__stats { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0; margin-top: 6px; }
+.lt__stats span {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 0 14px; border-right: 1px solid var(--line-soft);
+}
+.lt__stats span:first-child { padding-left: 0; }
+.lt__stats span:last-child { border-right: 0; }
+.lt__stats b { font-size: 19px; font-weight: 700; line-height: 1.05; color: var(--ink); font-variant-numeric: tabular-nums; }
+.lt__stats i { font-style: normal; font-size: 10px; color: var(--ink-3); }
 .lt__stops {
   font-size: var(--fs-xs); color: var(--ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
@@ -223,7 +242,25 @@
    小组件：抽签下一站（1×1）
    ========================================================= */
 .rlt { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; text-align: center; }
-.rlt__stage { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rlt__stage { width: 100%; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* 抽中后的画面落点：有照片用照片，没有就用类型色的首字块 */
+.rlt__thumb {
+  display: none; width: 52px; height: 52px; margin-bottom: 4px;
+  border-radius: 12px; overflow: hidden;
+  background: var(--surface-3) center / cover no-repeat;
+  box-shadow: var(--sh-1);
+}
+.rlt__thumb.is-on { display: grid; place-items: center; }
+.rlt__thumb.is-ph {
+  color: #fff; font-size: 20px; font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+}
+/* 未抽签时的占位：虚线空签筒 */
+.rlt__thumb.is-idle {
+  background: transparent; border: 1.5px dashed var(--line-2);
+  color: var(--ink-3); text-shadow: none; box-shadow: none;
+  font-size: 18px; font-weight: 600;
+}
 .rlt__kicker { font-size: var(--fs-xs); color: var(--ink-3); letter-spacing: .06em; }
 .rlt__name {
   font-size: var(--fs-xl); font-weight: 700; color: var(--ink); line-height: 1.2;
@@ -273,8 +310,15 @@
   background: var(--c2);
   transition: background var(--dur-fast) var(--ease);
 }
+/* 季节色：春灰绿 / 夏芥末 / 秋珊瑚 / 冬淡蓝（全部取自既有国家色，不新增色值） */
+.mon__col.is-spring .mon__bar { background: var(--c5); }
+.mon__col.is-summer .mon__bar { background: var(--c4); }
+.mon__col.is-autumn .mon__bar { background: var(--c1); }
+.mon__col.is-winter .mon__bar { background: var(--c2); }
 .mon__col.is-peak .mon__bar { background: var(--primary); }
-.mon__col.is-zero .mon__bar { background: var(--line); }
+/* 零值月画 2px 基线：内联 height:0 需要 !important 才能覆盖；
+   不给基线的话 12 个月里有 9 个是纯空白，月份轴看起来像缺了半截。 */
+.mon__col.is-zero .mon__bar { height: 2px !important; background: var(--line-2); }
 .mon__col:hover .mon__bar { background: var(--primary-ink); }
 .mon__lab {
   margin-top: 5px; text-align: center;
@@ -282,3 +326,135 @@
   font-variant-numeric: tabular-nums;
 }
 .mon__col.is-peak .mon__lab { color: var(--primary-ink); font-weight: 700; }
+/* 底部补充：平均频率 + 最冷清的月（顶部只说了峰值，另一头是空的） */
+.mon__foot {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--ink-3);
+}
+.mon__foot b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* =========================================================
+   小组件：愿望清单（1×1）—— 心愿卡
+   ---------------------------------------------------------
+   与「最近足迹」的 .mcard 分开命名：那张卡讲"去过哪"，
+   这张卡要一眼分出"想去 / 已去"，还要塞得下目标季与优先级。
+   ========================================================= */
+.wg { display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: hidden; }
+.wg:has(> .empty) { justify-content: center; }
+.wg__grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 10px; align-content: start;
+}
+.wcard {
+  display: flex; flex-direction: column; min-width: 0;
+  padding: 0; border: 0; background: none; text-align: left; cursor: pointer;
+}
+.wcard__media {
+  position: relative; display: block; aspect-ratio: 4 / 3;
+  border-radius: var(--r-md); overflow: hidden;
+  background: var(--surface-3); box-shadow: var(--sh-1);
+}
+.wcard__media img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+.wcard:hover .wcard__media img { transform: scale(1.06); }
+.wcard__tag {
+  position: absolute; left: 6px; top: 6px;
+  padding: 1px 7px; border-radius: var(--r-pill);
+  font-size: 10px; line-height: 1.5; color: #fff;
+}
+/* 想去 = 半透明深色（"还没发生"），已去 = 主色实心（"已经落袋"） */
+.wcard--want .wcard__tag { background: rgba(20, 24, 30, .5); backdrop-filter: blur(6px); }
+.wcard--done .wcard__tag { background: var(--primary); }
+.wcard__star {
+  position: absolute; right: 5px; top: 2px;
+  font-size: 11px; letter-spacing: -1px; color: #E3A33C;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+}
+.wcard__name {
+  margin-top: 5px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wcard__sub {
+  font-size: 11px; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wg__foot {
+  margin-top: auto; display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--ink-3);
+}
+.wg__foot b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.wg__bar { flex: 1 1 auto; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.wg__bar i { display: block; height: 100%; background: var(--primary); border-radius: 2px; }
+
+/* =========================================================
+   小组件：我的记录（1×1）—— 记录概览
+   ---------------------------------------------------------
+   不再铺图片（那是「最近足迹」的活），改为：总量 + 构成条 + 最近一条。
+   ========================================================= */
+.cl { display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: hidden; }
+.cl:has(> .empty) { justify-content: center; }
+.cl__sum { display: flex; align-items: baseline; gap: 6px; }
+.cl__sum b {
+  font-size: 30px; font-weight: 700; line-height: 1; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cl__sum > span { font-size: var(--fs-sm); color: var(--ink-3); }
+.cl__cover { margin-left: auto; font-size: 11px; }
+.cl__mix { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
+.cl__mix i { display: block; height: 100%; }
+.cl__mix .is-img { background: var(--c1); }
+.cl__mix .is-vid { background: var(--c4); }
+.cl__mix .is-txt { background: var(--c2); }
+.cl__legend { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--ink-3); }
+.cl__legend span { display: inline-flex; align-items: center; gap: 4px; }
+.cl__legend i { width: 6px; height: 6px; border-radius: 50%; }
+.cl__legend b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cl__latest {
+  display: flex; align-items: center; gap: 9px; margin-top: auto;
+  padding: 7px 8px; border: 0; border-radius: 11px;
+  background: var(--bg-warm); text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.cl__latest:hover { background: var(--primary-tint); }
+.cl__latest img {
+  flex: none; width: 42px; height: 42px; border-radius: 9px; object-fit: cover;
+  background: var(--surface-3); box-shadow: var(--sh-1);
+}
+.cl__latest-main { flex: 1 1 auto; min-width: 0; }
+.cl__latest-name {
+  display: block; font-size: var(--fs-sm); font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cl__latest-sub {
+  display: block; font-size: 11px; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cl__latest .ico { flex: none; color: var(--ink-3); }
+.cl__latest:hover .cl__latest-name { color: var(--primary-ink); }
+/* 大尺寸（≥300px 高）才出现的「按地点分布」：行高由 flex 等分，
+   卡片被拉多高都不会留空，也不用为 2×2/2×1 各写一套行数。 */
+.cl__places {
+  display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+  gap: 2px; margin: 4px 0 2px;
+}
+.cl__place {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-height: 20px;
+  padding: 0 4px; border: 0; background: none; border-radius: 6px;
+  text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.cl__place:hover { background: var(--bg-warm); }
+.cl__place b {
+  flex: none; width: 26px; text-align: right;
+  font-size: 11px; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cl__pname {
+  flex: 0 1 auto; max-width: 38%; font-size: 11px; color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cl__pbar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.cl__pbar i { display: block; height: 100%; background: var(--c1); border-radius: 2px; }

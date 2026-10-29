@@ -108,14 +108,21 @@ export function createPoster({ root, onOpen }) {
   const preloadSoft = (item) => Promise.race([preload(item), new Promise((r) => setTimeout(() => r(false), 2500))]);
 
   /* 按比例分派：cover 裁切下错配代价高（宽格塞竖图 / 竖格塞横图会被裁掉大半），
-     先用格子比例筛出"同朝向"的候选（横格→横图、竖格→竖图），没有匹配再回退随机。 */
+     先用格子比例筛出"同朝向"的候选（横格→横图、竖格→竖图），没有匹配再回退随机。
+     ⚠️ 候选先剔除"与当前块同一地点"的图：素材池已按地点配平，但随机仍可能
+        连抽到同一座城市，肉眼就是"这面墙全是一个地方"。剔除后无候选才退回全集。 */
   function pickNext(rec) {
+    const curId = rec.cur && rec.cur.place ? rec.cur.place.id : null;
+    const diverse = curId
+      ? pool.filter((it) => !it.place || it.place.id !== curId)
+      : pool;
+    const base = diverse.length ? diverse : pool;
     const ar = rec.ar;
-    if (ar && pool.length) {
+    if (ar && base.length) {
       const wantLand = ar > 1.15;     // 明显横向的格子
       const wantPort = ar < 0.87;     // 明显竖向的格子
       if (wantLand || wantPort) {
-        const matched = pool.filter((it) =>
+        const matched = base.filter((it) =>
           it !== rec.cur && typeof it._ar === 'number' &&
           (wantLand ? it._ar >= 0.9 : it._ar <= 1.12));
         if (matched.length) return matched[Math.floor(Math.random() * matched.length)];
@@ -123,7 +130,7 @@ export function createPoster({ root, onOpen }) {
     }
     let next = rec.cur;
     for (let guard = 0; guard < 12 && next === rec.cur; guard += 1) {
-      next = pool[Math.floor(Math.random() * pool.length)];
+      next = base[Math.floor(Math.random() * base.length)];
     }
     return next;
   }
@@ -278,7 +285,15 @@ export function createPoster({ root, onOpen }) {
       pool = next;
       if (first) {
         build();
-        blocks.forEach((rec) => { plan(rec); flip(rec, true); });
+        /* 首屏按池子顺序轮流发牌，而不是各块独立随机：
+           pool 由 ui.js 的 posterPool() 按「地点轮次交错」排好（A1 B1 C1 … A2 B2 …），
+           顺序取就能保证邻块来自不同地点。独立随机会让 5 个地点 10 块
+           排成「成都 ×4、九寨沟 ×3」，看起来就是主题重复。 */
+        blocks.forEach((rec, i) => {
+          rec.next = pool[i % pool.length];
+          preload(rec.next);
+          flip(rec, true);
+        });
         if (!reduceMotion()) blocks.forEach((rec) => schedule(rec));
       }
     },
