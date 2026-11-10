@@ -105,7 +105,12 @@ CREATE TABLE IF NOT EXISTS wish_annotations (
   priority   INTEGER DEFAULT 0,
   note       TEXT DEFAULT '',
   target     TEXT DEFAULT '',
-  added_at   TEXT DEFAULT (datetime('now'))
+  added_at   TEXT DEFAULT (datetime('now')),
+  /* 回访确认（2026-10-29 新增）：存「就这个日期已经问过用户」的日期串（YYYY-MM-DD）。
+     不是时间戳 —— 记日期是为了让「改期」能重新触发提醒：心愿日期一变，
+     与这里记的旧日期就对不上，新日期到期时会再问一次。
+     空串 = 从未确认过。 */
+  checked_at TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS wish_places (
   id         TEXT PRIMARY KEY,
@@ -116,7 +121,12 @@ CREATE TABLE IF NOT EXISTS wish_places (
   priority   INTEGER DEFAULT 0,
   note       TEXT DEFAULT '',
   target     TEXT DEFAULT '',
-  added_at   TEXT DEFAULT (datetime('now'))
+  added_at   TEXT DEFAULT (datetime('now')),
+  /* 计划出发日期（2026-10-29 新增，YYYY-MM-DD）。原来心愿只有 target 这个
+     自由文本（"2026 春"），程序读不出具体哪天，没法判断"时间过了"；
+     面板改成日期框后写这里，与 places.date 同格式，回访判定可以统一用 date。
+     target 列保留不动（老数据不会丢，只是不再作为时间依据）。 */
+  date       TEXT DEFAULT ''
 );
 `);
 
@@ -125,6 +135,10 @@ CREATE TABLE IF NOT EXISTS wish_places (
    "table media has no column named camera_make" 并让进程崩溃循环。
    （migrateMediaMeta 是函数声明，有提升，这里可安全调用下方定义。） */
 migrateMediaMeta();
+
+/* 老库补 checked_at 列，理由与时机同上（必须在预备语句之前）。
+   已有该列时 ALTER 会抛 "duplicate column name"，静默跳过即可。 */
+migrateWishChecked();
 
 /* ----------------------------- 写入 API ----------------------------- */
 
@@ -139,8 +153,12 @@ const stmt = {
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name, lng=excluded.lng, lat=excluded.lat, type=excluded.type,
       date=excluded.date, end_date=excluded.end_date, desc=excluded.desc,
-      country_code=excluded.country_code, city=excluded.city, color=excluded.color,
-      cover_url=excluded.cover_url, updated_at=datetime('now')
+      country_code=excluded.country_code, city=excluded.city,
+      /* color / cover_url 是"可以缺省"的展示字段：excluded 为 NULL 表示
+         本次请求没提供 → 保留库里的原值。详见 createPlace 里的说明。 */
+      color=CASE WHEN excluded.color IS NULL THEN places.color ELSE excluded.color END,
+      cover_url=CASE WHEN excluded.cover_url IS NULL THEN places.cover_url ELSE excluded.cover_url END,
+      updated_at=datetime('now')
   `),
   getPlace: db.prepare('SELECT * FROM places WHERE id=?'),
   delPlace: db.prepare('DELETE FROM places WHERE id=?'),
@@ -151,7 +169,9 @@ const stmt = {
     VALUES (@id,@name,@date,@end_date,@desc,@cover_url)
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name, date=excluded.date, end_date=excluded.end_date,
-      desc=excluded.desc, cover_url=excluded.cover_url
+      desc=excluded.desc,
+      /* 同 places.cover_url：没提供就保留原值，别把行程序列图清掉 */
+      cover_url=CASE WHEN excluded.cover_url IS NULL THEN trips.cover_url ELSE excluded.cover_url END
   `),
   getTrip: db.prepare('SELECT * FROM trips WHERE id=?'),
   delTrip: db.prepare('DELETE FROM trips WHERE id=?'),
@@ -191,20 +211,25 @@ const stmt = {
   /* 心愿：注解（按 place_id 索引）与自建心愿地点 */
   getWishAnnotations: db.prepare('SELECT * FROM wish_annotations'),
   getWishPlaces: db.prepare('SELECT * FROM wish_places'),
+  /* checked_at 用「传 NULL 就保留原值」的写法：前端 setAnn 是合并式写入，
+     不带这个字段的请求（比如只改优先级）不该把已确认记录抹掉。 */
   upsertWishAnnotation: db.prepare(`
-    INSERT INTO wish_annotations (place_id, wish, priority, note, target, added_at)
-    VALUES (@place_id, @wish, @priority, @note, @target, @added_at)
+    INSERT INTO wish_annotations (place_id, wish, priority, note, target, added_at, checked_at)
+    VALUES (@place_id, @wish, @priority, @note, @target, @added_at, @checked_at)
     ON CONFLICT(place_id) DO UPDATE SET
       wish=excluded.wish, priority=excluded.priority, note=excluded.note,
-      target=excluded.target, added_at=excluded.added_at
+      target=excluded.target, added_at=excluded.added_at,
+      checked_at=CASE WHEN excluded.checked_at IS NULL THEN wish_annotations.checked_at
+                      ELSE excluded.checked_at END
   `),
   delWishAnnotation: db.prepare('DELETE FROM wish_annotations WHERE place_id=?'),
   upsertWishPlace: db.prepare(`
-    INSERT INTO wish_places (id, name, country, lng, lat, priority, note, target, added_at)
-    VALUES (@id, @name, @country, @lng, @lat, @priority, @note, @target, @added_at)
+    INSERT INTO wish_places (id, name, country, lng, lat, priority, note, target, added_at, date)
+    VALUES (@id, @name, @country, @lng, @lat, @priority, @note, @target, @added_at, @date)
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name, country=excluded.country, lng=excluded.lng, lat=excluded.lat,
-      priority=excluded.priority, note=excluded.note, target=excluded.target
+      priority=excluded.priority, note=excluded.note, target=excluded.target,
+      date=CASE WHEN excluded.date IS NULL THEN wish_places.date ELSE excluded.date END
   `),
   delWishPlace: db.prepare('DELETE FROM wish_places WHERE id=?'),
 };
@@ -223,24 +248,75 @@ function setMeta(key, value) {
   stmt.setMeta.run(key, JSON.stringify(value));
 }
 
+/**
+ * 解析请求里的坐标；**没给**（缺失 / 空串 / 非数字 / 越界）一律返回 null。
+ *
+ * ⚠️ 不能直接 `Number(p.lng)`：`Number(null) === 0`、`Number('') === 0`，
+ *    于是"本次没带坐标"会被静默写成 (0,0) —— 几内亚湾，地图上就是一颗粒子
+ *    漂在大西洋里，看着像"打点偏了"。这正是旧金山 / 东京打点跑到非洲的原因。
+ */
+function parseCoord(p) {
+  const raw = Array.isArray(p.coord) ? p.coord : [p.lng, p.lat];
+  const num = (v) => (v == null || v === '' ? NaN : Number(v));
+  const lng = num(raw[0]);
+  const lat = num(raw[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  if (Math.abs(lng) > 180 || Math.abs(lat) > 90) return null;
+  return [lng, lat];
+}
+
+/**
+ * 新增 / 更新一个地点（按 id upsert）。
+ *
+ * ⚠️ 2026-10-29：`color` / `cover_url` 改成**缺省即保留**（NULL 透传给 ON CONFLICT 的 CASE）。
+ *    原来写死成 `p.color ? ... : ''`，于是任何"只改几个字段"的 PUT 都会把这两个字段清空。
+ *    实测事故：用户只改了旧金山 / 东京的日期（上传弹窗的 payload 不含 cover），
+ *    两地的地标封面当场被写成 ''，心愿清单与海报墙上的图直接消失。
+ *    现在要清空封面请用 setPlaceCoverUrl(id, '')（媒体上传后清占位图走的就是它）。
+ *
+ * ⚠️ 2026-10-29（同日第二处）：`lng/lat` 与 `type` 同样改成**缺省即保留**。
+ *    坐标走 parseCoord()，请求里没带就沿用库里原值 —— 否则一次不带 coord 的 PUT
+ *    会把这个点搬到 (0,0)。type 同理：payload 里没有 type 时不再回落成「默认」，
+ *    免得把「目的地」（心愿）洗成普通足迹，让地图给没去过的国家上色。
+ */
 function createPlace(p) {
   const id = p.id && String(p.id).startsWith('p_') ? p.id : uid('p');
-  const coord = Array.isArray(p.coord) ? p.coord : [Number(p.lng), Number(p.lat)];
+  /* 只有"更新"才需要读旧行（拿原坐标/原类型兜底）；新增走默认值。 */
+  const prev = stmt.getPlace.get(id);
+  const coord = parseCoord(p) || (prev ? [prev.lng, prev.lat] : [0, 0]);
+  const type = p.type != null && String(p.type) !== ''
+    ? String(p.type)
+    : (prev ? prev.type : '默认');
+  const hasCover = p.cover != null;
+  const hasColor = p.color != null;
   stmt.upsertPlace.run({
     id,
     name: String(p.name || '未命名'),
-    lng: Number(coord[0]),
-    lat: Number(coord[1]),
-    type: String(p.type || '默认'),
+    lng: coord[0],
+    lat: coord[1],
+    type,
     date: String(p.date || ''),
     end_date: String(p.end_date || ''),
     desc: String(p.desc || ''),
     country_code: String(p.countryCode || p.country || ''),
     city: String(p.city || ''),
-    color: p.color ? String(p.color) : '',
-    cover_url: p.cover ? String(p.cover) : '',
+    /* null = 本次不改（保留原值）；要清空请显式传 '' */
+    color: hasColor ? String(p.color) : null,
+    cover_url: hasCover ? String(p.cover) : null,
   });
   return id;
+}
+
+/**
+ * 「没有封面、也没有任何媒体」的地点：启动时由 landmark.backfillPlaceCovers() 补地标图。
+ * 有媒体的地点不需要 —— 前端的封面会回退到第一张图，补了反而会盖住真实照片。
+ */
+function placesMissingCover() {
+  return db.prepare(`
+    SELECT p.id, p.name FROM places p
+    WHERE (p.cover_url IS NULL OR p.cover_url = '')
+      AND NOT EXISTS (SELECT 1 FROM media m WHERE m.place_id = p.id AND m.status = 'ready')
+  `).all();
 }
 
 function deletePlace(id) {
@@ -279,7 +355,8 @@ function createTrip(t) {
     date: String(t.date || ''),
     end_date: String(t.end_date || ''),
     desc: String(t.desc || ''),
-    cover_url: t.cover ? String(t.cover) : '',
+    /* null = 本次不改（保留原值）；要清空请显式传 '' */
+    cover_url: t.cover != null ? String(t.cover) : null,
   });
   if (Array.isArray(t.places)) {
     stmt.setTripPlaces.run(id);
@@ -424,6 +501,8 @@ function getWishes() {
       note: a.note || '',
       target: a.target || '',
       addedAt: a.added_at != null ? Number(a.added_at) || a.added_at : null,
+      /* 已确认过的「那一天的日期」；空串 = 没确认过 */
+      checkedAt: a.checked_at || '',
     };
   }
   const places = stmt.getWishPlaces.all().map((p) => ({
@@ -437,6 +516,8 @@ function getWishes() {
     note: p.note || '',
     target: p.target || '',
     addedAt: p.added_at != null ? Number(p.added_at) || p.added_at : null,
+    /* 计划出发日期（YYYY-MM-DD）；前端拿到后自己算 dateTs / hasFutureDate */
+    date: p.date || '',
     type: '目的地',
     isWishNew: true,
     media: [],
@@ -459,6 +540,8 @@ function upsertWishAnnotation(a) {
     note: String(a.note || ''),
     target: String(a.target || ''),
     added_at: a.addedAt != null ? String(a.addedAt) : new Date().toISOString(),
+    /* null = 「本次不改动」，交给 SQL 的 CASE 保留原值；要清空请显式传 '' */
+    checked_at: a.checkedAt != null ? String(a.checkedAt) : null,
   });
   return true;
 }
@@ -487,6 +570,8 @@ function saveWishPlace(p) {
     note: String((p && p.note) || ''),
     target: String((p && p.target) || ''),
     added_at: p && p.addedAt != null ? String(p.addedAt) : new Date().toISOString(),
+    /* null = 本次不改（保留原值）；要清空请显式传 '' */
+    date: p && p.date != null ? String(p.date) : null,
   });
   return id;
 }
@@ -891,10 +976,28 @@ function migrateMediaMeta() {
   }
 }
 
+/* 2026-10-29 新增：心愿回访确认字段 + 心愿地点的计划日期。
+   写法同 migrateMediaMeta（先查 pragma 再 ALTER）。
+   ⚠️ 两张表都要补：新版 CREATE TABLE 里已有这两列，**老库没有** ——
+      不补的话 require 阶段 prepare upsertWishPlace 就会抛
+      "table wish_places has no column named date"，进程直接起不来。 */
+function migrateWishChecked() {
+  const haveAnn = new Set((db.pragma('table_info(wish_annotations)') || []).map((c) => c.name));
+  if (!haveAnn.has('checked_at')) {
+    try { db.prepare("ALTER TABLE wish_annotations ADD COLUMN checked_at TEXT DEFAULT ''").run(); }
+    catch (e) { console.warn('[migrate] wish_annotations 加列失败 checked_at', e.message); }
+  }
+  const havePlace = new Set((db.pragma('table_info(wish_places)') || []).map((c) => c.name));
+  if (!havePlace.has('date')) {
+    try { db.prepare("ALTER TABLE wish_places ADD COLUMN date TEXT DEFAULT ''").run(); }
+    catch (e) { console.warn('[migrate] wish_places 加列失败 date', e.message); }
+  }
+}
+
 module.exports = {
   db, DB_PATH, DATA_DIR,
   uid, saveTypes, getMeta, setMeta,
-  createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia,
+  createPlace, deletePlace, createTrip, deleteTrip, addMedia, deleteMedia, placesMissingCover,
   updateMedia, setPlaceCoverUrl, setMediaMeta, migrateMediaMeta,
   markMediaReady, markMediaError,
   getExport, getExportBundle, applyImportBundle, exportDbSnapshot, maybeSeed,

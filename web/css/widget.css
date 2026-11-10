@@ -25,6 +25,13 @@
 }
 .widget__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
+/* 海报墙：**永不滚动**，也不要出现"瞬时滚动条"。
+   翻牌是 3D 变换，投影会短暂画出内容框（Chrome 的这一帧仍可能计入滚动溢出），
+   而 `overflow:auto` 的 body 一旦判定溢出就会插进一条滚动条 —— 内容宽度瞬间少
+   十几像素 → 整面墙重排 → 看起来就是"模块抽一下"，条子消失后再抽回来。
+   这面墙本来就没有可滚的内容（格子按墙高 1fr 分），直接 hidden。 */
+.widget[data-type="poster"] .widget__body { overflow: hidden; }
+
 /* 编辑态工具栏：默认隐藏，进入编辑态才显示 */
 .widget__tools {
   position: absolute; top: 8px; right: 8px; z-index: 6;
@@ -333,6 +340,42 @@
   font-size: 11px; color: var(--ink-3);
 }
 .mon__foot b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* =========================================================
+   心愿回访提醒（右上角铃铛 + 浮层）
+   ---------------------------------------------------------
+   心愿的日期过了 → 顶栏露出带角标的按钮 → 点开问「去了没」，
+   再按回答分三支处理。浮层是自己定位的（跟着按钮右下角走），
+   不进网格，也不参与编辑态。
+   ========================================================= */
+.rv-btn { position: relative; }
+/* ⚠️ [hidden] 的默认 display:none 只有 0,1,0 特异性，会被 `.btn{display:inline-flex}` 盖掉
+   （按钮明明 hidden 却还戳在那）。必须自己补一条更高特异性的规则。 */
+.rv-btn[hidden] { display: none; }
+.rv-btn__badge {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--c-danger, #C9493F); color: #fff;
+  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.rv-pop {
+  position: fixed; z-index: 95; width: 296px;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg); box-shadow: var(--sh-2); padding: 14px 14px 12px;
+}
+.rv-pop__kicker { font-size: 11px; color: var(--ink-3); margin-bottom: 3px; }
+.rv-pop__q { font-size: var(--fs-md); font-weight: 600; color: var(--ink); line-height: 1.45; }
+.rv-pop__sub { font-size: var(--fs-sm); color: var(--ink-3); margin-top: 4px; line-height: 1.5; }
+.rv-pop__acts { display: flex; gap: 8px; margin-top: 12px; }
+.rv-pop__acts .btn { flex: 1 1 0; justify-content: center; }
+.rv-pop__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--ink-3);
+}
+.rv-pop__foot button { border: 0; background: none; color: var(--ink-3); font-size: 11px; cursor: pointer; padding: 0; }
+.rv-pop__foot button:hover { color: var(--ink-2); }
 
 /* =========================================================
    小组件：愿望清单（1×1）—— 心愿卡

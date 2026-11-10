@@ -24,6 +24,7 @@ const path = require('path');
 const { DATA_DIR, getExport, maybeSeed, migrateMediaMeta, ensureGeocitiesLoaded } = require('./src/db');
 const { AUTH_ENABLED, requireAuth } = require('./src/auth');
 const { initStorage, getStorageInfo, ensureBucket } = require('./src/storage');
+const { backfillPlaceCovers } = require('./src/landmark');
 
 const WEB_DIR = path.join(__dirname, 'web');
 const PORT = Number(process.env.PORT || 8080);
@@ -108,5 +109,8 @@ app.get(/^(?!\/(api|media)).*/, (_req, res) => {
     console.log(`媒体存储：${info.useMinio
       ? `MinIO bucket "${info.minio.bucket}" @ ${info.minio.endpoint}:${info.minio.port}`
       : '本地磁盘 ' + info.local.dir}`);
+    /* 后台补齐「没媒体又没封面」的地点的地标图（存量修复：老版本编辑地点会把
+       cover_url 覆盖成空串）。不 await、不阻塞启动；离线时逐个静默失败。 */
+    setTimeout(() => { backfillPlaceCovers().catch(() => {}); }, 1500);
   });
 })();

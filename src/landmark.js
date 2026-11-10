@@ -61,4 +61,31 @@ async function fetchLandmarkImage(name) {
   return (await wikiThumb('zh')) || (await wikiThumb('en')) || (await commonsThumb());
 }
 
-module.exports = { fetchLandmarkImage };
+/**
+ * 启动时补齐「有名字、没媒体、没封面」的地点（后台跑，失败静默）。
+ *
+ * 为什么需要：2026-10-29 之前的 upsert 会把缺失的 cover 当成空串整行覆盖，
+ * 于是「编辑一次地点」就会把建点时联网抓的地标封面抹掉，而前端只会退化成
+ * 类型色占位块 —— 数据其实已经丢了，靠前端怎么修都补不回来。
+ * 库层已改成「缺省即保留」，存量被抹掉的行则由这里在下次启动时自动抓回来；
+ * 用户自己传过照片的地点（media 非空）不碰，封面照旧由媒体兜底。
+ *
+ * 惰性 require('./db')：db.js 加载期会建表/迁移，且 landmark 被 routes 引用，
+ * 顶层互相 require 会形成加载环。
+ */
+async function backfillPlaceCovers() {
+  let db;
+  try { db = require('./db'); } catch (_) { return; }
+  if (typeof db.placesMissingCover !== 'function') return;
+  let rows = [];
+  try { rows = db.placesMissingCover(); } catch (_) { return; }
+  if (!rows.length) return;
+  let fixed = 0;
+  for (const r of rows) {
+    const url = await fetchLandmarkImage(r.name);
+    if (url) { db.setPlaceCoverUrl(r.id, url); fixed += 1; }
+  }
+  if (fixed) console.log(`[cover] 已为 ${fixed} 个无封面地点补齐地标图（共检查 ${rows.length} 个）`);
+}
+
+module.exports = { fetchLandmarkImage, backfillPlaceCovers };

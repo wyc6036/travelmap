@@ -22,7 +22,7 @@
  */
 
 import { api } from './api.js';
-import { toast } from './utils.js';
+import { toast, parseDate } from './utils.js';
 
 const WISH_KEY = 'travelmap.wish.v1';
 const WISH_PLACES_KEY = 'travelmap.wish.places.v1';
@@ -85,7 +85,9 @@ export function initWishes() {
       } else {
         // 服务端权威
         wishAnn = annotations;
-        newPlaces = Array.isArray(places) ? places : [];
+        /* 服务端只给 date 字符串，dateTs / hasFutureDate 要在前端补 ——
+           回访提醒与「年内计划」都读这两个字段，缺了会把有日期的心愿当成无日期。 */
+        newPlaces = (Array.isArray(places) ? places : []).map(normalizeWishPlace);
         writeJSON(WISH_KEY, wishAnn);
         writeJSON(WISH_PLACES_KEY, newPlaces);
       }
@@ -115,18 +117,35 @@ function addNewPlace(place) {
   writeJSON(WISH_PLACES_KEY, newPlaces);
 }
 
+/** 从服务端拿到的心愿地点补上派生字段（dateTs / hasFutureDate / 类型标记） */
+function normalizeWishPlace(p) {
+  const ts = p && p.date ? parseDate(p.date).ts : null;
+  return {
+    ...p,
+    date: (p && p.date) || '',
+    dateTs: ts,
+    hasFutureDate: !!ts && ts > Date.now(),
+    type: '目的地',
+    isWishNew: true,
+  };
+}
+
 /**
  * 在「添加心愿」面板新建一个纯本机心愿地点，并写入其心愿注解。
  * 先在内存 + 本机镜像落好（乐观更新，断网也能用），再异步推到服务端。
  * id 由前端生成（wish-...），保证本地与服务端一致。
  * @returns {string} 新建地点 id
  */
-export function addWishPlace({ name, country, priority, note, target, lng, lat }) {
+export function addWishPlace({ name, country, priority, note, target, lng, lat, date }) {
   const id = 'wish-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const addedAt = Date.now();
+  /* 计划出发日期（2026-10-29 起面板改日期框，写 wish_places.date）。
+     与 places 一样派生 dateTs / hasFutureDate —— 回访提醒和「年内计划」
+     都靠这两个字段，不能只留字符串。 */
+  const ts = date ? parseDate(date).ts : null;
   const place = {
     id, name, countryZh: country || null, country: country || null,
-    type: '目的地', date: '', dateTs: null, hasFutureDate: false,
+    type: '目的地', date: date || '', dateTs: ts, hasFutureDate: !!ts && ts > Date.now(),
     lng: (lng == null ? null : +lng), lat: (lat == null ? null : +lat),
     priority: priority || 0, note: note || '', target: target || '', addedAt,
     media: [], mediaCount: { image: 0, video: 0, text: 0, total: 0 }, cover: '', isWishNew: true,
@@ -148,29 +167,70 @@ async function pushDeletePlace(id) {
 }
 
 /**
- * 编辑一个已存在的「新建」心愿地点（名称 / 国家 / 城市 / 优先级 / 备注 / 目标时间 / 坐标）。
+ * 编辑一个已存在的「新建」心愿地点（名称 / 国家 / 优先级 / 备注 / 目标时间 / 坐标）。
  * 同时在内存 + 本机镜像 + 服务端（PUT 按 id 幂等 upsert）落好。
+ *
+ * ⚠️ 2026-10-29 起是**合并式**更新：每个字段「传了才改，没传（undefined）保持原值」。
+ *    旧写法是 `name || p.name` / `country || null` —— 只改日期（`updateWishPlace(id,{date})`）
+ *    会把国家清成 null、优先级清成 0、备注清成空串。回访提醒里「换个时间再去」正是
+ *    这种单字段调用，不改就会顺手把心愿别的信息抹掉。
  * @returns {boolean} 是否找到并更新成功
  */
-export function updateWishPlace(id, { name, country, priority, note, target, lng, lat }) {
+export function updateWishPlace(id, patch = {}) {
   const idx = newPlaces.findIndex((p) => p.id === id);
   if (idx < 0) return false;
   const p = newPlaces[idx];
+  const name = patch.name != null ? patch.name : p.name;
+  const country = patch.country != null ? patch.country : (p.country || p.countryZh || null);
+  const priority = patch.priority != null ? patch.priority : (p.priority || 0);
+  const note = patch.note != null ? patch.note : (p.note || '');
+  const target = patch.target != null ? patch.target : (p.target || '');
+  const lng = patch.lng != null ? +patch.lng : p.lng;
+  const lat = patch.lat != null ? +patch.lat : p.lat;
+  const newDate = patch.date != null ? patch.date : (p.date || '');
+  const ts = newDate ? parseDate(newDate).ts : null;
   const updated = {
     ...p,
-    name: name || p.name,
-    countryZh: country || null, country: country || null,
-    lng: (lng == null ? p.lng : +lng),
-    lat: (lat == null ? p.lat : +lat),
-    priority: priority || 0,
-    note: note || '', target: target || '',
+    name,
+    countryZh: country, country,
+    lng, lat,
+    priority,
+    note, target,
+    date: newDate, dateTs: ts, hasFutureDate: !!ts && ts > Date.now(),
   };
   newPlaces[idx] = updated;
   writeJSON(WISH_PLACES_KEY, newPlaces);
   pushPlaceUpdate(updated);
-  // 注解（note / priority / target / wish）一并更新
-  setAnn(id, { wish: true, priority: priority || 0, note: note || '', target: target || '', addedAt: p.addedAt || Date.now() });
+  // 注解（note / priority / target）一并更新
+  /* ⚠️ 这里**不要**写 wish:true：回访提醒的「不去了」是先 setAnn(wish:false) 再
+     顺手清日期（updateWishPlace(id,{date:''})），一旦在这里把 wish 顶回 true，
+     心愿就又回清单了 —— 顺序上根本看不出来，只有角标不减才暴露。 */
+  setAnn(id, { priority, note, target, addedAt: p.addedAt || Date.now() });
   return true;
+}
+
+/* ---------- 回访提醒（心愿「到日期了」的待确认队列） ----------
+   判定放在数据源里，因为只有这里同时握着注解（checkedAt）和自建心愿地点，
+   ui.js 侧只负责「谁在清单里」（派生口径 isWished 在那里）。
+
+   checkedAt 记的是**被确认时那个日期**，不是时间戳：改期后 p.date 变了，
+   与 checkedAt 不再相等 → 新日期会重新提醒一次，符合"换个时间再去"的预期。 */
+
+/** 该心愿是否「到日期了但还没确认去过没去过」 */
+export function needsRevisit(p) {
+  if (!p || !p.dateTs || p.dateTs > Date.now()) return false;
+  return (wishAnn[p.id] || {}).checkedAt !== p.date;
+}
+
+/** 标记该日期已确认（写入注解的 checkedAt） */
+export function markRevisitChecked(p) {
+  if (!p) return;
+  setAnn(p.id, { checkedAt: p.date || '' });
+}
+
+/** 清掉确认标记（改期后要让新日期重新提醒时用） */
+export function clearRevisitChecked(id) {
+  setAnn(id, { checkedAt: '' });
 }
 
 /**

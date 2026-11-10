@@ -15,7 +15,10 @@
     "preview:widgets-shot": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-shot.js",
     "preview:widgets-grid-shot": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-grid-shot.js",
     "preview:widgets-narrow": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/widgets-narrow.js",
-    "preview:mgrid": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/mgrid-check.js"
+    "preview:mgrid": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/mgrid-check.js",
+    "preview:revisit": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/revisit-check.js",
+    "preview:wishcolor": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/wish-color-check.js",
+    "preview:icon": "NODE_PATH=/Users/wyc/.workbuddy/binaries/node/workspace/node_modules node preview/icon-check.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

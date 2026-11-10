@@ -25,7 +25,7 @@ let pickMode = false;
 let pickHandler = null;
 let editingId = null;            // 非 null = 编辑模式
 let editingType = null;          // 编辑模式下原地点类型（下拉里已无「目的地」选项，需保留原值防误改）
-let editingDefaultSelType = null;// 编辑时若原类型无法在 dropdown 表达，浏览器回落到的默认选中值
+let typeTouched = false;         // 用户本次是否真的动过类型下拉（决定要不要沿用原类型）
 let existingMedia = [];          // 编辑模式下该地点的已有媒体（含 id）
 let cityAC = null;               // 城市自动补全下拉
 
@@ -40,7 +40,7 @@ function resetForm() {
   // 退出编辑态
   editingId = null;
   editingType = null;
-  editingDefaultSelType = null;
+  typeTouched = false;
   existingMedia = [];
   renderExistingMedia();
   const title = $('tm-add-title');
@@ -246,6 +246,9 @@ export function createAddPlace({ getMap, onSaved: saved } = {}) {
   $('tm-add-city')?.addEventListener('focus', onCityInput);
   $('tm-add-city')?.addEventListener('blur', () => setTimeout(hideCityAC, 150));
 
+  /* 类型下拉：只有用户真的换了一项才算"改过类型"（编辑模式据此决定是否沿用原类型） */
+  $('tm-add-type')?.addEventListener('change', () => { typeTouched = true; });
+
   /* 提交 */
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -281,10 +284,11 @@ function edit(place) {
   const set = (id, v) => { const el = $(id); if (el) el.value = (v == null ? '' : v); };
   set('tm-add-name', place.name);
   set('tm-add-type', place.type);
-  /* 记录原类型：下拉已移除「目的地」选项，若原类型是「目的地」浏览器无法选中，
-     会在提交时回落成其它类型，把心愿地点误改成普通足迹 —— 这里记下原值以便提交时还原。 */
+  /* 记录原类型：下拉已移除「目的地」选项，浏览器无法选中它（value 变空串、
+     selectedIndex 落到 -1），提交时会被 `|| '旅行'` 兜底成普通足迹。
+     这里记下原值，配合 typeTouched 在提交时还原。 */
   editingType = place.type;
-  editingDefaultSelType = $('tm-add-type')?.value || null;
+  typeTouched = false;
   set('tm-add-date', place.date);
   set('tm-add-enddate', place.endDate);
   const lng = place.lng != null ? place.lng : (place.coord && place.coord[0]);
@@ -363,12 +367,13 @@ async function submit() {
   const lngS = r5(lng);
   const latS = r5(lat);
 
-  /* 编辑模式下，若原类型是下拉里已删除的「目的地」（浏览器无法选中、回落成默认项），
-     且用户没手动改过类型，则还原为原类型，避免把心愿地点误改成普通足迹。 */
+  /* 编辑模式下，若原类型是下拉里已删除的「目的地」，浏览器无法选中它
+     （value = ''，再被兜底成「旅行」），用户没动过下拉就必须沿用原类型，
+     否则"只改了个日期"就把心愿地点转成了真实足迹 —— 地图会开始给该国上色。
+     ⚠️ 判断依据是 change 事件（typeTouched），不是"选中值是否等于回落值"：
+        回落值是空串，`'' || null === null`，老写法永远判不出"没动过"，防御等于没有。 */
   const selType = $('tm-add-type')?.value || '旅行';
-  const type = (editingId && editingType && editingDefaultSelType != null && selType === editingDefaultSelType)
-    ? editingType
-    : selType;
+  const type = (editingId && editingType && !typeTouched) ? editingType : selType;
 
   const place = {
     name,

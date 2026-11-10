@@ -36,7 +36,7 @@ import { pinSvg } from './markers.js';
 import { createPoster } from './poster.js';
 /* 心愿注解的唯一数据源（localStorage + 跨模块变更通知），与 upload.js 共用，
    避免重复维护、缓存不一致。ui.js 内只保留派生口径等纯函数。 */
-import { getAnn, setAnn, getNewPlaces, addWishPlace, updateWishPlace, deleteWishPlace, initWishes } from './wishstore.js';
+import { getAnn, setAnn, getNewPlaces, addWishPlace, updateWishPlace, deleteWishPlace, initWishes, needsRevisit, markRevisitChecked, clearRevisitChecked } from './wishstore.js';
 /* 国家 / 地区中心点经纬度库（离线优先，Nominatim 在线兜底）—— 新建心愿地点填国家时补全坐标 */
 import { COUNTRY_CENTROIDS } from './country-centroids.js';
 
@@ -182,13 +182,15 @@ function pickDom(map) {
   return out;
 }
 
-export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive, onEditPlace }) {
+export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChange, onSearch, onOpenTrip, onAddPlace, onAddTrip, onOpenArchive, onEditPlace, onDataChanged }) {
   const dom = pickDom({
     nav: '#tm-nav',
     scroll: '#tm-scroll',
     title: '#tm-view-title',
     sub: '#tm-view-sub',
     share: '#tm-share',
+    /* 回访提醒按钮：有心愿「到日期了」才露出（hidden 由 paintRevisit 控制） */
+    revisit: '#tm-revisit',
     add: '#tm-add',
     tripAdd: '#tm-trip',
     search: '#tm-search',
@@ -459,6 +461,250 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     const sp = state.places.filter((p) => annOf(p.id).wish === false);
     return np.concat(sp);
   }
+
+  /**
+   * 归一化地点对象 → 后端 createPlace 认识的字段（只改个别字段时用）。
+   *
+   * ⚠️ 不**能**直接 `api.updatePlace(p.id, {...p, date})`：
+   *    前端对象里是 `endDate`（camelCase），后端读的是 `end_date` —— 直传等于
+   *    把结束日期写成空串；同理 `media` / `raw` 之类多余字段也无意义。
+   *    `cover` / `color` 这里**刻意不发**：后端已改成"缺省即保留"，
+   *    不发才会保留（发空串反而是"清空"）。
+   */
+  function placePatch(p, patch = {}) {
+    return {
+      name: p.name,
+      coord: [p.lng, p.lat],
+      type: p.type,
+      date: p.date || '',
+      end_date: p.endDate || '',
+      desc: p.desc || '',
+      countryCode: p.countryCode || '',
+      city: p.city || '',
+      ...patch,
+    };
+  }
+
+  /* ---------- 心愿回访提醒（顶栏铃铛 + 浮层三分支） ----------
+     心愿写了日期 → 日期一过就进"待确认"队列 → 顶栏露出带角标的按钮。
+     点开只问**一个**心愿（队列最早的），答完角标减一，再点问下一个 ——
+     一次一个问题，比把所有到期心愿糊成一屏更好答。
+
+     ⚠️ 队列判定（needsRevisit）在 wishstore.js：那里同时握着注解的 checkedAt
+        和自建心愿地点；这里只负责"谁在清单里"（isWished 派生口径）。
+
+     ⚠️ checkedAt 存的是**被确认时的日期字符串**，不是时间戳：
+        改期后 p.date 变了，和 checkedAt 不再相等 → 新日期会重新提醒一次。 */
+  function dueRevisits() {
+    if (!state) return [];
+    return wishlistPlaces().filter(needsRevisit).sort((a, b) => (a.dateTs || 0) - (b.dateTs || 0));
+  }
+
+  let rvPop = null;
+  /** @param {boolean} keepOpen 队列空了也别收起（「去了」后还要问"加不加媒体"） */
+  function paintRevisit(keepOpen = false) {
+    const btn = dom.revisit;
+    if (!btn) return [];
+    const list = dueRevisits();
+    btn.hidden = list.length === 0;
+    const badge = btn.querySelector('[data-role="badge"]');
+    if (badge) badge.textContent = list.length > 9 ? '9+' : String(list.length);
+    btn.title = list.length ? `${list.length} 个心愿到日期了，点一下确认去没去` : '';
+    /* 队列空了就收起浮层；还有的话**不**在这里换题 —— 换题由 rvAdvance 决定
+       （「去了」要先停在第二问，直接跳下一题会问错对象）。 */
+    if (!list.length && !keepOpen) closeRevisitPop();
+    return list;
+  }
+
+  function closeRevisitPop() {
+    if (!rvPop) return;
+    rvPop.remove();
+    rvPop = null;
+  }
+  function positionRvPop(el) {
+    const r = (dom.revisit || el).getBoundingClientRect();
+    const w = el.offsetWidth || 296;
+    const h = el.offsetHeight || 160;
+    const left = Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 8);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }
+
+  /** 渲染浮层的某一屏：ask（去了吗）→ went（加媒体吗）→ notwent（换时间吗） */
+  function rvStep(p, step) {
+    if (!rvPop || !p) return;
+    rvPop.dataset.step = step;
+    const when = p.date ? formatDateDot(p.date) : '计划日期';
+    const rest = dueRevisits().length;
+    const foot = `<div class="rv-pop__foot">
+        <span>${rest > 1 ? `还有 ${rest - 1} 个待确认` : '仅此一个待确认'}</span>
+        <button type="button" data-act="later">以后再说</button>
+      </div>`;
+    let html = '';
+    if (step === 'ask') {
+      html = `
+        <div class="rv-pop__kicker">心愿回访 · ${escapeHtml(when)}</div>
+        <div class="rv-pop__q">${escapeHtml(p.name)} —— 计划 ${escapeHtml(when)} 出发，去了吗？</div>
+        <div class="rv-pop__sub">确认去过会把它标成旅行足迹；没去可以改时间或移出清单。</div>
+        <div class="rv-pop__acts">
+          <button class="btn" type="button" data-act="went">去了</button>
+          <button class="btn btn--ghost" type="button" data-act="notwent">没去</button>
+        </div>${foot}`;
+    } else if (step === 'went') {
+      html = `
+        <div class="rv-pop__kicker">已确认去过</div>
+        <div class="rv-pop__q">要给这次${escapeHtml(p.name)}之行加点照片或视频吗？</div>
+        <div class="rv-pop__sub">会打开「编辑足迹」，可以直接拖文件进去。</div>
+        <div class="rv-pop__acts">
+          <button class="btn" type="button" data-act="addmedia">添加媒体</button>
+          <button class="btn btn--ghost" type="button" data-act="skip">先不用</button>
+        </div>${foot}`;
+    } else {
+      html = `
+        <div class="rv-pop__kicker">没去 · ${escapeHtml(p.name)}</div>
+        <div class="rv-pop__q">要不要换个时间再去？</div>
+        <div class="rv-pop__sub">改时间会保留心愿，到新日期再提醒一次；不去了则移出清单并清空日期。</div>
+        <div class="rv-pop__acts">
+          <button class="btn" type="button" data-act="reschedule">换个时间</button>
+          <button class="btn btn--ghost" type="button" data-act="giveup">不去了</button>
+        </div>${foot}`;
+    }
+    rvPop.innerHTML = html;
+    /* ⚠️ 当前问的是**哪一个**必须记在浮层上：第二问（加媒体）和第三问（换时间）
+       都还是同一个心愿，不能每次都取 dueRevisits()[0] —— 第一问答完它就出队了，
+       取队首会问到下一个心愿头上（实测：确认「到期足迹」去过之后，
+       第二问却显示「到期心愿A」）。 */
+    rvPop.dataset.id = p.id;
+    positionRvPop(rvPop);
+  }
+
+  /** 浮层当前问的心愿（按 id 从数据源里取，找不到说明已被处理掉） */
+  function rvCurrent() {
+    const id = rvPop && rvPop.dataset.id;
+    if (!id || !state) return null;
+    return state.places.find((p) => p.id === id) || getNewPlaces().find((p) => p.id === id) || null;
+  }
+
+  /** 答完一题 → 接队列里的下一个；没有就收起 */
+  function rvAdvance() {
+    const first = dueRevisits()[0];
+    if (rvPop && first) rvStep(first, 'ask');
+    else closeRevisitPop();
+  }
+
+  function openRevisitPop() {
+    const list = dueRevisits();
+    if (!list.length) { toast('没有待确认的心愿', 1600); return; }
+    if (rvPop) { closeRevisitPop(); return; }        // 再点一次 = 收起
+    const el = document.createElement('div');
+    el.className = 'rv-pop';
+    el.dataset.step = 'ask';
+    document.body.append(el);
+    rvPop = el;
+    rvStep(list[0], 'ask');
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-act]');
+      if (!b) return;
+      const act = b.dataset.act;
+      const p = rvCurrent();
+      if (!p) { closeRevisitPop(); return; }
+      if (act === 'later') { closeRevisitPop(); return; }
+      if (act === 'went') { confirmWent(p); return; }
+      if (act === 'notwent') { rvStep(p, 'notwent'); return; }
+      /* 「添加媒体」：A 类直接开「编辑足迹」；B 类要先落地成足迹（confirmWent 里
+         已建好 places 记录），这里拿到的是心愿对象，换成立足迹对象再交给弹窗。 */
+      if (act === 'addmedia') { closeRevisitPop(); openMediaEditorFor(p); return; }
+      if (act === 'skip') { rvAdvance(); return; }
+      if (act === 'reschedule') { closeRevisitPop(); rescheduleWish(p); return; }
+      if (act === 'giveup') { giveUpWish(p); return; }
+    });
+  }
+
+  /** 打开「编辑足迹」弹窗补媒体（心愿已确认去过，A 类原对象即可；B 类要换成落地后的足迹） */
+  function openMediaEditorFor(p) {
+    if (typeof onEditPlace !== 'function') return;
+    if (!p.isWishNew) { onEditPlace(p); return; }
+    /* B 类：confirmWent 建的新足迹 id 是服务端生成的，只能按名字 + 日期反查 */
+    const fp = state.places.find((x) => x.name === p.name && x.date === p.date && x.type !== '目的地');
+    onEditPlace(fp || { ...p, type: '旅行', media: [] });
+  }
+
+  /** 「去了」：标记已确认 + 把心愿落成真实旅行足迹（A 类改类型，B 类建足迹） */
+  function confirmWent(p) {
+    markRevisitChecked(p);
+    if (p.isWishNew) {
+      /* B 类（自建心愿地点）：心愿表里没有"足迹"这回事，得先在 places 建一条
+         （POST 返回新 id），再把心愿本身删掉，否则地图上永远点不亮。 */
+      /* ⚠️ 坐标必须自己算清楚再发：后端没有坐标就无法建点，而 `Number(null) === 0`
+         会把它写成 (0,0)（几内亚湾）—— 地图上就是一颗图钉漂在大西洋中央。
+         没有城市级坐标时退回国家中心点，至少落在正确的国家里。 */
+      const cc = p.countryCode || p.cc || '';
+      const cname = p.country || p.countryZh || '';
+      const cent = COUNTRY_CENTROIDS.find((c) => (cc && c.cc === cc) || (!cc && cname && c.name === cname));
+      const hasXY = Number.isFinite(p.lng) && Number.isFinite(p.lat);
+      const lng = hasXY ? p.lng : (cent ? cent.lng : null);
+      const lat = hasXY ? p.lat : (cent ? cent.lat : null);
+      api.createPlace({
+        name: p.name, type: '旅行', date: p.date || '',
+        countryCode: p.countryCode || p.cc || '', country: p.country || p.countryZh || '',
+        city: p.city || '', lng, lat, desc: p.note || '',
+      }).then((r) => {
+        const newId = r && r.id;
+        if (newId) {
+          const a = annOf(p.id);
+          setAnn(newId, { ...a, wish: false, checkedAt: '' });   // 已是足迹，不再是心愿
+        }
+        deleteWishPlace(p.id);
+        if (typeof onDataChanged === 'function') onDataChanged();
+        toast('已记为去过', 1800);
+      }).catch(() => toast('写入足迹失败，心愿先保留了', 2400));
+    } else if (p.type !== '旅行') {
+      /* A 类（真实足迹，类型是「目的地」）：geo.js 的点亮口径会跳过「目的地」，
+         不改类型的话国家永远不亮 —— 确认去过正是把它转正的时机。 */
+      api.updatePlace(p.id, placePatch(p, { type: '旅行' }))
+        .then(() => { if (typeof onDataChanged === 'function') onDataChanged(); })
+        .catch(() => toast('更新类型失败', 2000));
+    }
+    /* 先停在第二问（问的是**刚确认这个** p，不是队列里的下一个）。
+       ⚠️ keepOpen：这是队列里最后一个时，paintRevisit 默认会把浮层收起，
+          第二问（加不加媒体）就永远问不出来了。 */
+    paintRevisit(true);
+    if (rvPop) rvStep(p, 'went');
+    if (currentView === 'wishlist') renderWishlistView();
+  }
+
+  /** 「换个时间」：打开带日期框的编辑弹窗（A 类走足迹弹窗，B 类走心愿弹窗） */
+  function rescheduleWish(p) {
+    if (p.isWishNew) { openWishEdit(p); return; }
+    if (typeof onEditPlace === 'function') onEditPlace(p);
+  }
+
+  /** 「不去了」：移出清单 + 清空日期（地点记录保留，可在「已取消」里找回） */
+  function giveUpWish(p) {
+    clearRevisitChecked(p.id);
+    setAnn(p.id, { wish: false });
+    if (p.isWishNew) updateWishPlace(p.id, { date: '' });
+    else api.updatePlace(p.id, placePatch(p, { date: '' })).catch(() => toast('清空日期失败', 2000));
+    toast('已移出心愿清单', 1800);
+    paintRevisit();
+    rvAdvance();                                     // 接队列里的下一个（没有就收起）
+    if (currentView === 'wishlist') renderWishlistView();
+    if (typeof onDataChanged === 'function') onDataChanged();
+  }
+
+  if (dom.revisit) {
+    dom.revisit.addEventListener('click', (e) => { e.stopPropagation(); openRevisitPop(); });
+  }
+  /* 点浮层外面 / 按 Esc / 页面滚动 → 收起（fixed 定位不跟随滚动，容易被甩在原处） */
+  document.addEventListener('pointerdown', (e) => {
+    if (!rvPop) return;
+    if (rvPop.contains(e.target) || (dom.revisit && dom.revisit.contains(e.target))) return;
+    closeRevisitPop();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRevisitPop(); });
+  window.addEventListener('resize', () => { if (rvPop) positionRvPop(rvPop); });
 
   function paintWishlist(stripEl, totalEl) {
     const wish = wishlistPlaces();
@@ -798,9 +1044,11 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     el.dataset.id = p.id;
     const stars = [1, 2, 3].map((i) => `<span class="${i <= pri ? '' : 'off'}" data-pri="${i}">★</span>`).join('');
     const note = a.note ? `<div class="wl-note"><b>为什么想去：</b>${escapeHtml(a.note)}</div>` : '';
-    const target = a.target
-      ? `<span class="wl-tag">🎯 ${escapeHtml(a.target)}</span>`
-      : (p.hasFutureDate ? `<span class="wl-tag">🗓 ${escapeHtml(formatDateDot(p.date))}</span>` : '<span class="wl-tag">🗓 未定</span>');
+    /* 时间口径统一：先认**日期**（places.date / wish_places.date），
+       只有老数据那种"2026 春"的文本 target 才退回 🎯 原样显示。 */
+    const target = p.date
+      ? `<span class="wl-tag">🗓 ${escapeHtml(formatDateDot(p.date))}</span>`
+      : (a.target ? `<span class="wl-tag">🎯 ${escapeHtml(a.target)}</span>` : '<span class="wl-tag">🗓 未定</span>');
     el.innerHTML = `
       ${wlCover(p)}
       ${canceled
@@ -828,8 +1076,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           <textarea data-role="enote" placeholder="写一句心愿，比如：想赶樱花季拍竹林">${escapeHtml(a.note || '')}</textarea>
         </div>
         <div>
-          <label>目标时间（如 2026 春 / 未定）</label>
-          <input type="text" data-role="etarget" value="${escapeHtml(a.target || '')}" placeholder="2026 春" />
+          <label>计划出发日期</label>
+          <input type="date" data-role="edate" value="${/^\d{4}-\d{2}-\d{2}$/.test(p.date || '') ? escapeHtml(p.date) : ''}" />
         </div>
         <div class="wl-editor__acts">
           <button class="save" data-act="save" type="button">保存</button>
@@ -912,12 +1160,13 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
   function buildSoonList(all) {
     const wrap = document.createElement('div');
     wrap.className = 'wl-soon';
-    const items = all.filter((p) => { const a = annOf(p.id); return (a.target && a.target !== '未定') || p.hasFutureDate; })
+    /* 只看**有日期**的心愿（A 类 places.date / B 类 wish_places.date 同格式）；
+       没有 dateTs 的排最后。老的文本 target 不再算"有目标时间"。 */
+    const items = all.filter((p) => p.dateTs)
       .sort((a, b) => (a.dateTs || Infinity) - (b.dateTs || Infinity));
-    if (!items.length) { wrap.innerHTML = '<div class="wl-soon__empty">还没有设定目标时间的心愿</div>'; return wrap; }
+    if (!items.length) { wrap.innerHTML = '<div class="wl-soon__empty">还没有设定出发日期的心愿</div>'; return wrap; }
     items.slice(0, 8).forEach((p) => {
-      const a = annOf(p.id);
-      const when = (a.target && a.target !== '未定') ? a.target : (p.date ? formatDateDot(p.date) : '未定');
+      const when = p.date ? formatDateDot(p.date) : '未定';
       const it = document.createElement('div');
       it.className = 'wl-soon__item';
       it.innerHTML = `<span class="wl-soon__dot" style="background:${state.colorOf(p)}"></span><span class="wl-soon__name">${escapeHtml(p.name)}</span><span class="wl-soon__when">${escapeHtml(when)}</span>`;
@@ -1139,9 +1388,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
         <div class="wl-editor__stars" data-role="cstars" data-pri="0"><span class="off" data-cpri="1">★</span><span class="off" data-cpri="2">★</span><span class="off" data-cpri="3">★</span></div>
         <label>为什么想去 / 想做的事</label>
         <textarea data-role="nnote" placeholder="写一句心愿，比如：想赶樱花季拍竹林"></textarea>
-        <label>目标时间（如 2026 春 / 未定）</label>
-        <input type="text" data-role="ntarget" placeholder="2026 春" />
-        <button class="wl-add__create" data-act="createwish" type="button">创建心愿</button>
+          <label>计划出发日期（留空 = 还没定时间）</label>
+          <input type="date" data-role="ndate" />
+          <button class="wl-add__create" data-act="createwish" type="button">创建心愿</button>
         <div class="wl-add__err" data-role="nerr"></div>
       </div>
       <div class="wl-add__existing" data-role="addexisting" hidden>
@@ -1184,8 +1433,8 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           <div class="wl-editor__stars" data-role="cstars" data-pri="0"><span class="off" data-cpri="1">★</span><span class="off" data-cpri="2">★</span><span class="off" data-cpri="3">★</span></div>
           <label>为什么想去 / 想做的事</label>
           <textarea data-role="nnote" placeholder="写一句心愿，比如：想赶樱花季拍竹林"></textarea>
-          <label>目标时间（如 2026 春 / 未定）</label>
-          <input type="text" data-role="ntarget" placeholder="2026 春" />
+          <label>计划出发日期（留空 = 还没定时间）</label>
+          <input type="date" data-role="ndate" />
           <div class="wl-add__err" data-role="nerr"></div>
         </form>
         <div class="modal-edit__foot">
@@ -1227,7 +1476,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     setVal(m, 'ncountry', place.countryZh || place.country || '');
     setVal(m, 'ncity', place.city || '');
     setVal(m, 'nnote', a.note || '');
-    setVal(m, 'ntarget', a.target || '');
+    /* 目标时间已改为**日期**（写 wish_places.date）：老数据里 target 可能是
+       "2026 春" 这种文本，塞不进 <input type=date>，非 YYYY-MM-DD 一律留空。 */
+    setVal(m, 'ndate', /^\d{4}-\d{2}-\d{2}$/.test(place.date || '') ? place.date : '');
     const stars = body.querySelector('[data-role="cstars"]');
     const pri = place.priority || a.priority || 0;
     stars.dataset.pri = String(pri);
@@ -1263,10 +1514,10 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     const country = body.querySelector('[data-role="ncountry"]').value.trim();
     const pri = +(body.querySelector('[data-role="cstars"]').dataset.pri || 0);
     const note = body.querySelector('[data-role="nnote"]').value.trim();
-    const target = body.querySelector('[data-role="ntarget"]').value.trim();
+    const date = body.querySelector('[data-role="ndate"]')?.value || '';
     const geo = wishCityGeo || wishCountryGeo;       // 城市精确坐标优先
     updateWishPlace(id, {
-      name, country, priority: pri, note, target,
+      name, country, priority: pri, note, date,
       lng: geo?.lng ?? null, lat: geo?.lat ?? null,
     });
     closeWishEdit();
@@ -1370,8 +1621,26 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       const ed = card.querySelector('.wl-editor');
       const pri = +(ed.dataset.pri || annOf(id).priority || 0);
       const note = ed.querySelector('[data-role="enote"]').value.trim();
-      const target = ed.querySelector('[data-role="etarget"]').value.trim();
-      setAnn(id, { priority: pri, note, target, wish: true });
+      /* 时间改走**日期框**（写 places.date / wish_places.date）。
+         老数据那种"2026 春"文本 target 不再有输入口，但仍要原样保留 ——
+         没日期的心愿卡要能退回 🎯 显示它，不能因为这次保存被清空。 */
+      const date = ed.querySelector('[data-role="edate"]')?.value || '';
+      const p = byWishId(id);
+      if (p && p.isWishNew) {
+        updateWishPlace(id, { date });            // 自建心愿地点：日期存地点本身
+      } else if (p && p.date !== date) {
+        /* 真实足迹地点：日期在 places 表里，得走后端；改完触发一次整表刷新，
+           否则地图时间线 / 年内计划还是旧日期。 */
+        api.updatePlace(p.id, placePatch(p, { date })).then(() => {
+          if (typeof onDataChanged === 'function') onDataChanged();
+        }).catch(() => toast('日期保存失败', 2000));
+        p.date = date;
+        p.dateTs = date ? parseDate(date).ts : null;
+        p.hasFutureDate = !!p.dateTs && p.dateTs > Date.now();
+      }
+      setAnn(id, { priority: pri, note, wish: true });
+      /* 改了日期就把"已确认"标记清掉：新日期到点后要重新问一次 */
+      if (p && p.date !== date) clearRevisitChecked(id);
       renderWishlistView();
     } else if (act === 'pri') {
       setAnn(card.dataset.id, { priority: +t.dataset.pri });
@@ -1403,9 +1672,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
       const country = ap.querySelector('[data-role="ncountry"]').value.trim();
       const pri = +(ap.querySelector('[data-role="cstars"]').dataset.pri || 0);
       const note = ap.querySelector('[data-role="nnote"]').value.trim();
-      const target = ap.querySelector('[data-role="ntarget"]').value.trim();
+      const date = ap.querySelector('[data-role="ndate"]')?.value || '';
       const geo = wishCityGeo || wishCountryGeo;   // 城市精确坐标优先，否则用国家中心点
-      addWishPlace({ name, country, priority: pri, note, target, lng: geo?.lng ?? null, lat: geo?.lat ?? null });
+      addWishPlace({ name, country, priority: pri, note, date, lng: geo?.lng ?? null, lat: geo?.lat ?? null });
       renderWishlistView();
     } else if (act === 'addpick') {
       setAnn(t.dataset.id, { wish: true, addedAt: Date.now() });
@@ -1519,6 +1788,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     wrap.append(foot);
 
     root.append(wrap);
+    /* 心愿视图里改完（加心愿 / 改日期 / 移出清单）角标要跟着变，
+       不必等下一轮轮询 —— 这是唯一能改到队列的地方。 */
+    paintRevisit();
   }
 
   /**
@@ -1691,6 +1963,10 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
 
     // 首页小组件网格（Widget 注册表渲染，见下方 Widget 系统）
     renderHome();
+
+    /* 回访提醒角标：数据每轮刷新都要重算（心愿的"到没到日期"跟时间有关，
+       也可能在别的端改过日期）。放在 renderHome 之后，保证取到最新注解。 */
+    paintRevisit();
 
     if (currentView === 'footprints') renderFootprintsView();
     if (currentView === 'collections') renderCollectionsView();
@@ -1982,9 +2258,9 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
           const cover = img0.thumb_url || img0.url || p.cover || './assets/sidebar-art.svg';
           /* 国家优先：city 常常就是地点名本身（"西雅图 · 西雅图"重复过一版） */
           const where = p.countryZh || p.country || p.city || p.type || '';
-          const extra = done
-            ? (p.date ? formatDateDot(p.date) : '')
-            : (a.target && a.target !== '未定' ? a.target : '');
+          /* 已去 → 显示去过的日期；没去 → 显示计划日期（有就显示，没有就不补） */
+          const extra = p.date ? formatDateDot(p.date)
+            : (!done && a.target ? a.target : '');
           const sub = [where, extra].filter(Boolean).join(' · ');
           const pri = Number(a.priority) || 0;
           btn.innerHTML = `
@@ -2831,5 +3107,7 @@ export function createUI({ onSelectPlace, onOpenDetail, onOpenPhoto, onViewChang
     setSelected(place) { if (state) state.selected = place; },
     getStats: computeStats,
     getView: () => currentView,
+    /* 待回访队列（验收脚本 / 控制台排查用：为什么角标是这个数） */
+    getDueRevisits: dueRevisits,
   };
 }

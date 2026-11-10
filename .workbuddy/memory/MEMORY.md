@@ -7,7 +7,23 @@
 ## 愿望清单（2026-10-17~18 重设计 + 后端持久化）
 - **服务端权威**：SQLite `wish_annotations`(place_id PK,wish,priority,note,target,added_at) + `wish_places`(id PK,name,country,lng,lat,priority,note,target,added_at)，见 `src/db.js`、`web/js/api.js`（GET/PUT/POST/DELETE `/api/wishes...`）。localStorage 仅离线镜像：`travelmap.wish.v1`（按 place.id）、`travelmap.wish.places.v1`（用户自建地点 `isWishNew:true`）。`web/js/wishstore.js` 是唯一数据源，`ui.js`/`upload.js` 共用；写操作乐观本机 + fire-and-forget 上云，`initWishes()` 幂等（服务端空且本机有数据→一次性迁移）。
 - 入口只从愿望清单「＋ 添加心愿」面板进；`upload.js` 已删「目的地」选项（`isWished` 派生保留向后兼容）。
-- 坑：①`renderWishlistView()` 必须始终渲染 `.wl` 外壳+工具栏+添加面板，零心愿不能提前 return；②`saveWishPlace` 无坐标必须存 NULL（存 0 会漂到几内亚湾被误判有坐标）；检测 `!Number.isFinite(lng/lat)`；③国家/城市补全下拉挂 `input.parentElement`，label+input 须各包 `.wl-add__row`；坐标优先级 `wishCityGeo > wishCountryGeo`；④`countries.js`（地图）与 `country-centroids.js`（心愿补全）有意并行，不合并；⑤已取消分流：`isWishNew`→`deleteWishPlace`，真实足迹→`setAnn({wish:undefined})`；⑥愿望地图 lng/lat 等距投影自绘 + `assets/world-silhouette.svg` 底图，不新建 MapLibre 实例。
+- 坑：①`renderWishlistView()` 必须始终渲染 `.wl` 外壳+工具栏+添加面板，零心愿不能提前 return；②`saveWishPlace` 无坐标必须存 NULL（存 0 会漂到几内亚湾被误判有坐标）；检测 `!Number.isFinite(lng/lat)`；③国家/城市补全下拉挂 `input.parentElement`，label+input 须各包 `.wl-add__row`；坐标优先级 `wishCityGeo > wishCountryGeo`；④`countries.js`（地图）与 `country-centroids.js`（心愿补全）有意并行，不合并；⑤已取消分流：`isWishNew`→`deleteWishPlace`，真实足迹→`setAnn({wish:undefined})`；⑥愿望地图 lng/lat 等距投影自绘 + `assets/world-silhouette.svg` 底图，不新建 MapLibre 实例；⑦**注解没有 DELETE 接口**，验收脚本换轮次时必须 `PUT /wishes/annotations/:id {checkedAt:''}` 重置，否则上轮的确认状态会让同 id 同日期的心愿直接被判为「已确认」，队列空得像功能坏了。
+- **心愿时间统一走日期框（2026-10-29）**：`wish_places.date`（B 类）与 `places.date`（A 类）同为 `YYYY-MM-DD`，是「到没到日期」的唯一依据；老的 `target` 自由文本（"2026 春"）保留但只作无日期时的 🎯 回退显示。添加面板与卡内编辑器都是 `<input type="date">`（`ndate` / `edate`），A 类改日期走 `api.updatePlace`，B 类走 `updateWishPlace`。
+- **`updateWishPlace` 是合并式**（`patch.x != null ? patch.x : p.x`）：只传 `{date}` 不该动其它字段（旧写法 `country || null` 会清空国家/优先级/备注）。也**不要**在里面写 `setAnn({wish:true})` —— 会顶掉刚设的 `wish:false`。
+
+## 心愿回访提醒（2026-10-29 新增）
+- 到期未确认的心愿 → 顶栏 `#tm-revisit`（`.rv-btn` + 角标）露出，点开 `.rv-pop` 一次问一个：去了（→ 加媒体）／没去（→ 换时间 or 不去了）。队列在 `ui.js:dueRevisits()`，判定在 `wishstore.js:needsRevisit()`（有日期 + 已过 + `checkedAt !== p.date`）。
+- `checked_at` 存**日期串**而非时间戳：改期后自动重新提醒。确认「去过」时 A 类 `type:'目的地'→'旅行'`（geo.js 点亮口径跳过「目的地」，不转正国家不亮），B 类 `api.createPlace` 落地成足迹再 `deleteWishPlace`。「不去了」= `setAnn(wish:false)` + 清日期（记录保留，可在「已取消」找回）。
+- 坑：浮层第二/三问必须用 `rvPop.dataset.id` + `rvCurrent()` 定位当前心愿，取 `dueRevisits()[0]` 会问到下一个头上；队列剩最后一个时 `paintRevisit()` 要传 `keepOpen`，否则「加不加媒体」问不出来；`.btn{display:inline-flex}` 会盖掉 `[hidden]`，必须补 `.rv-btn[hidden]{display:none}`。
+- 验收 `npm run preview:revisit`（自造 3 条到期数据 → 三分支 → 自动清理）。
+
+## 国家上色 / 坐标口径（2026-10-29 踩坑后固化）
+- **没去过的地方（含愿望地点）绝不上色**：`geo.js:collectVisited()` 靠 `type==='目的地'` 跳过。这条口径是对的，出问题的一律是**数据被洗成了「旅行」**。
+- `upload.js` 的「编辑足迹」弹窗：类型下拉只有 居住/旅行（无「目的地」），旧代码用"选中值 == 回落值"判断用户有没有改类型，但回落值是空串 → `'' || null === null` → 防御永远不生效。**必须按 change 事件判断**（`typeTouched`），没动过就沿用 `editingType`。
+- `src/db.js:createPlace()` 除 color/cover 外，`lng/lat` 与 `type` 也改成**缺省即保留**（`parseCoord()` 判 null；`prev = stmt.getPlace.get(id)` 兜底）。⚠️ `Number(null)===0`、`Number('')===0` —— 任何"没带坐标"的请求都会把点搬到 (0,0)（几内亚湾）。
+- `confirmWent()` 让 B 类心愿落地成足迹时，坐标要 `Number.isFinite` 校验，拿不到就退 `COUNTRY_CENTROIDS` 的国家中心点。
+- 排查口径：`place.countryCounted` = "算不算进统计"，**不是**"有没有点亮"；点亮看 `visited.has(place.countryId)`。图层用 `match` 表达式上色，`queryRenderedFeatures` 在任何陆地都命中，验上色要读 `getPaintProperty('tm-country-visited','fill-color')` 里列了哪些 id。
+- 验收 `npm run preview:wishcolor`（含"只改日期 → 类型/坐标/封面必须保住"的端到端回归）。
 
 ## 首页小组件（iOS 磁贴）
 - 尺寸离散 1x1/2x1/1x2/2x2/3x2；**8 个组件全部可用**（recent/wishlist/collections/poster + pending/lastTrip/roulette/month）+ 编辑态（拖拽/尺寸/替换/移除/重置布局，`travelmap.layout.v1`）；`comingSoon` 机制已整体删除，别再引入占位。
@@ -16,6 +32,10 @@
 - `pending` 的「未归类照片」不在 `/api/data`（`place_id` 为空），走 `GET /api/media/pending` + `api.pendingMedia()`，前端 60s TTL 缓存；「缺日期」条目依赖 `createUI({ onEditPlace })`（main.js → `addPlace.edit`）。
 - 坑：`month` 必须用 `getUTCMonth()`（`dateTs` 来自 `Date.UTC()`）；柱高百分比要套一层 `.mon__track`，否则会顶掉月份标签。
 - 坑：`lastTrip` 只认挂了 `places` 的行程（库里有同名空壳行程，会把地点/记录数显示成 0），无行程才退回最近一个过去足迹。
+
+## 图标 sprite（2026-10-29）
+- 全部图标在 `web/index.html` 顶部 `<svg class="svg-sprite">` 的 `<defs>` 里，`<g id="i-xxx">` + `<use href="#i-xxx">`；尺寸统一走 `.ico`(18) / `.ico--sm`(14)，局部用 `.xxx .ico{width/height}` 覆盖（**必须成对写，只写一个就会变形**）。
+- ⚠️ **path 里别用相对移动去"拼第二段"**：`#i-trash` 原写法 `m-9 0` 从把手末端 (15,7) 回到桶身起点 (6,7)，导致桶身中心 11 ≠ 盖子中心 12，15px 下看着就是"图标歪了"。已改成绝对坐标 `M7 7`。改图标后跑 `npm run preview:icon`（像素镜像 IoU ≥ 0.92、重心偏差 ≤ 1px）。
 
 ## 运行 / 测试环境
 - 沙箱 `HTTP_PROXY=127.0.0.1:54072`；访问本机端口要 `--noproxy` 或 Playwright `bypass:'<-loopback>'`（curl 用 `--noproxy '*'`）。前端 ESM 必须经 HTTP 访问，不能 `file://`。

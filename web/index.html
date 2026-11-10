@@ -63,7 +63,12 @@ if (location.protocol === 'file:') {
     <g id="i-arrow"><path d="M5 12h14M12 5l7 7-7 7"/></g>
     <g id="i-globe"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18"/><path d="M12 2.8a15 15 0 0 1 0 18.4 15 15 0 0 1 0-18.4z"/></g>
     <g id="i-edit"><path d="M14.5 5.5 18.5 9.5M4 20l1.2-4.3 10.3-10.3a2 2 0 0 1 2.8 0l1.8 1.8a2 2 0 0 1 0 2.8L9.3 18.8 5 20z"/></g>
-    <g id="i-trash"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0 1 13a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-13"/></g>
+    <!-- 垃圾桶：⛔ 桶身必须**相对盖子居中对齐**。老写法用 `m-9 0` 从把手末端
+         (15,7) 相对跳回桶身起点，落到 (6,7) —— 而盖子 4→20 的中心是 12，
+         桶身 6→16 的中心是 11，整体偏左一单位：小尺寸下左壁近乎竖直、右壁斜切，
+         看起来就是"图标歪了/变形了"。这里改用绝对坐标 M7 7 起笔（中心 = 12），
+         并把桶底收窄一点（1.6 的斜度 + h2.8），才像垃圾桶而不是水桶。 -->
+    <g id="i-trash"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 7l1.6 13a2 2 0 0 0 2 2h2.8a2 2 0 0 0 2-2L17 7"/></g>
     <!-- 重置：逆时针箭头回到起点，对应"恢复默认布局" -->
     <g id="i-refresh"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></g>
     <!-- 路线：起点/终点两枚节点 + 蜿蜒路径，整体关于 (12,12) 点对称，
@@ -151,6 +156,12 @@ if (location.protocol === 'file:') {
           <p class="topbar__sub" id="tm-view-sub">点亮你去过的地方</p>
         </div>
         <div class="topbar__right">
+          <!-- 心愿回访提醒：有心愿「到日期了」才露出（JS 控制 hidden）。
+               放在最左，与右边那排操作按钮拉开，免得被当成普通功能键。 -->
+          <button class="btn btn--icon rv-btn" id="tm-revisit" hidden aria-label="到期的行程待确认">
+            <svg class="ico" viewBox="0 0 24 24"><use href="#i-calendar"/></svg>
+            <span class="rv-btn__badge" data-role="badge"></span>
+          </button>
           <button class="btn btn--ghost" id="tm-share">
             <svg class="ico" viewBox="0 0 24 24"><use href="#i-share"/></svg>分享地图
           </button>

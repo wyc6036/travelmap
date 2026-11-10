@@ -25,6 +25,11 @@ const SHUFFLE_STAGGER = 90; // 「换一批」时逐块错开（ms）
 
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+/** 空闲时执行（Safari 无 requestIdleCallback，退化为下一轮宏任务） */
+const rvIdle = window.requestIdleCallback
+  ? (fn) => window.requestIdleCallback(fn, { timeout: 400 })
+  : (fn) => setTimeout(fn, 64);
+
 /**
  * @param {object} opts
  * @param {HTMLElement} opts.root    挂载点（#tm-poster-wall）
@@ -142,6 +147,21 @@ export function createPoster({ root, onOpen }) {
   }
 
   /* ---------- 翻牌 ---------- */
+
+  /**
+   * 让「transition:none + 新角度」这一对样式**立即提交**，但**不触发整页重排**。
+   *
+   * ⚠️ 原来这里写的是 `void inner.offsetWidth` —— 读 offsetWidth 会强制浏览器
+   *    同步 flush 样式 + 布局（整棵树），而它出现在 `transitionend` 回调里：
+   *    每翻完一圈就在动画结束时卡一帧。页面上还挂着 MapLibre 画布和十几个图片块，
+   *    这一下同步布局的代价足以看出"抽一下"。改读 computed transform：
+   *    transform 是合成属性，解析计算值只需要样式阶段，不需要布局。
+   */
+  function flushStyle(el) {
+    // eslint-disable-next-line no-unused-expressions
+    getComputedStyle(el).transform;
+  }
+
   function flip(rec, immediate = false) {
     if (pool.length < 2) return;
     const next = rec.next || pickNext(rec);
@@ -157,7 +177,7 @@ export function createPoster({ root, onOpen }) {
         rec.inner.style.transition = 'none';
         rec.rot = (rec.rot + 180) % 360;
         rec.inner.style.transform = `rotateY(${rec.rot}deg)`;
-        void rec.inner.offsetWidth;        // 强制 reflow，让"无过渡"先生效
+        flushStyle(rec.inner);             // 只 flush 样式，别拉整页布局
         rec.inner.style.transition = '';
       } else {
         rec.rot += 180;
@@ -235,13 +255,20 @@ export function createPoster({ root, onOpen }) {
       // 逐渐漂移，在合成层表现为翻牌时亚像素左右抖动。360° 与 0° 视觉完全等价，
       // 翻完瞬移归零不可见，但能彻底避免角度失控。
       el.addEventListener('transitionend', (e) => {
-        if (e.propertyName === 'transform' && rec.rot >= 360) {
+        if (e.propertyName !== 'transform' || rec.rot < 360) return;
+        /* ⚠️ 归零**不能**在 transitionend 里同步做：这个事件正好落在合成器提交
+           动画最后一帧的同一个任务里，此刻再写两条 style + flush 样式，
+           会把这一帧的样式解析/提交往后拖 —— 画面表现就是卡片落定时"抽一下"。
+           丢到空闲帧再做，角度不变、视觉完全等价，还把开销挪出了动画帧。
+           （期间若又发生一次翻牌，rot 会先 +180，这里 %360 后与其视觉角度相同，
+             不会出现跳变。） */
+        rvIdle(() => {
           rec.rot %= 360;
           inner.style.transition = 'none';
           inner.style.transform = `rotateY(${rec.rot}deg)`;
-          void inner.offsetWidth;
+          flushStyle(inner);               // 同上：曾是 offsetWidth，会同步整页布局
           inner.style.transition = '';
-        }
+        });
       });
       return rec;
     });
